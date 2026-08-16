@@ -1,4 +1,141 @@
- justify-center">
+import { useParams } from "wouter";
+import { useState } from "react";
+import { useProject } from "@/hooks/use-projects";
+import { useCreateFile } from "@/hooks/use-files";
+import { useCreateInvestment } from "@/hooks/use-investments";
+import { useCreateSubmission } from "@/hooks/use-submissions";
+import { useCreateOffering, useProjectOfferings } from "@/hooks/use-offerings";
+import { useCoproducers, useSelectCoproducers } from "@/hooks/use-coproducers";
+import { useProjectNegotiations, useMyNegotiation, useSubmitNegotiation, useRespondNegotiation } from "@/hooks/use-negotiations";
+import { useProjectLaunchStatus, useUnlockLicense, useMyLicenseUnlock } from "@/hooks/use-license";
+import { useAuth } from "@/hooks/use-auth";
+import { usePlayer } from "@/context/player";
+import { AddToPlaylistMenu } from "@/components/add-to-playlist-menu";
+import { format } from "date-fns";
+import {
+  FileAudio, FileImage, FileCode, UploadCloud, TrendingUp, AlertCircle,
+  ArrowLeft, Plus, Headphones, Mic2, Heart, Lightbulb, Shuffle,
+  Crown, Sparkles, Star, Music2, DollarSign, Lock, Globe, EyeOff,
+  Film, SlidersHorizontal, PersonStanding, CheckCircle2, XCircle, ToggleLeft, ToggleRight,
+  Rocket, CheckCheck, Key, Banknote, Play, Pause,
+} from "lucide-react";
+import { Handshake } from "lucide-react";
+import { Link } from "wouter";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RoleBadge, SUBMISSION_TYPE_LABELS, getSubmissionTypesForRoles, hasNegotiableRole } from "@/components/role-badge";
+import type { Submission, User } from "@shared/schema";
+
+const SUBMISSION_TYPE_GROUPS = {
+  "Beats & Production": ["beat", "loop", "stem", "melody", "drum-kit", "collab-beat"],
+  "Writing & Vocals": ["hook", "song-concept", "verse", "theme", "song-title", "vocal-sample"],
+  "Creative Ideas": ["mood-board", "visual-idea", "narrative-idea", "challenge", "concept"],
+  "Video & Marketing": ["music-video-concept", "promo-asset", "social-media-pack", "visual-campaign"],
+  "Audio Engineering": ["mix", "master", "vocal-production", "sound-design"],
+  "Performance": ["choreography-concept", "performance-video", "acting-reel"],
+};
+
+const PRODUCER_BEAT_TYPES = ["beat", "loop", "stem", "melody", "drum-kit", "collab-beat"];
+
+const LAUNCH_CATEGORY_LABELS: Record<string, string> = {
+  producer: "Producer",
+  writer: "Writer",
+  supporter: "Supporter",
+  collaborator: "Collaborator",
+  videographer: "Videographer / Marketing",
+  engineer: "Recording Engineer",
+  dancer: "Dancer / Actor",
+  ministry: "Ministry",
+};
+
+const SPLIT_META: Record<string, { label: string; color: string; icon: typeof Mic2; description: string }> = {
+  artist:        { label: "Artist / Vocalist",   color: "bg-violet-500",  icon: Mic2,   description: "Master recording share (negotiable)" },
+  producers:     { label: "Producer(s)",          color: "bg-primary",     icon: Music2, description: "Investment equity % assigned per backer" },
+  "co-producers":{ label: "Co-Producers (3+4)",  color: "bg-amber-500",   icon: Star,   description: "3% Master each × 7 blessed creators" },
+  ministry:      { label: "Ministry Bestowal",    color: "bg-emerald-500", icon: Crown,  description: "Platform bestowal (Master) + optional 5% publishing admin" },
+};
+const SPLIT_ORDER = ["artist", "producers", "co-producers", "ministry"];
+
+type PersistedSplit = { role: string; percentage: string | number };
+
+function CircleSplitPanel({ royaltySplits }: { royaltySplits: PersistedSplit[] }) {
+  const splitMap = new Map(royaltySplits.map(s => [s.role, Number(s.percentage)]));
+  const fallback: Record<string, number> = { artist: 50, producers: 0, "co-producers": 21, ministry: 5 };
+
+  const splits = SPLIT_ORDER.map(role => {
+    const meta = SPLIT_META[role];
+    const percent = splitMap.has(role) ? splitMap.get(role)! : (fallback[role] ?? 0);
+    return { role, ...meta, percent };
+  });
+  const total = splits.reduce((sum, s) => sum + s.percent, 0);
+
+  return (
+    <div className="space-y-4" data-testid="circle-split-panel">
+      <div className="w-full h-3 rounded-full overflow-hidden flex gap-0.5" data-testid="split-bar">
+        {splits.map(s => (
+          <div
+            key={s.role}
+            className={`${s.color} h-full transition-all`}
+            style={{ width: `${(s.percent / 100) * 100}%` }}
+            title={`${s.role}: ${s.percent}%`}
+          />
+        ))}
+      </div>
+
+      <div className="space-y-3">
+        {splits.map(s => {
+          const Icon = s.icon;
+          return (
+            <div key={s.role} className="flex items-start gap-3" data-testid={`split-row-${s.role.toLowerCase().replace(/[\s/()]+/g, '-')}`}>
+              <div className={`w-3 h-3 rounded-sm mt-0.5 flex-shrink-0 ${s.color}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium flex items-center gap-1.5">
+                    <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+                    {s.role}
+                  </span>
+                  <span className="text-sm font-mono font-bold tabular-nums">{s.percent}%</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">{s.description}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="pt-2 border-t border-white/5 flex justify-between text-xs text-muted-foreground">
+        <span>Displayed total</span>
+        <span className="font-mono">{total}% Master</span>
+      </div>
+      <p className="text-xs text-muted-foreground/60 italic">
+        Remaining {100 - total}% reserved for artist negotiation, publishing splits & unclaimed shares.
+      </p>
+    </div>
+  );
+}
+
+function CoproducerPanel({
+  isCreator,
+  projectId,
+  hasOfferings,
+}: {
+  isCreator: boolean;
+  projectId: number;
+  hasOfferings: boolean;
+}) {
+  const { data: coproducers = [] } = useCoproducers(projectId);
+  const selectCoproducers = useSelectCoproducers(projectId);
+  const selected = coproducers.length > 0;
+
+  return (
+    <div className="glass-panel rounded-3xl p-6" data-testid="coproducer-panel">
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center">
             <Star className="w-4 h-4 text-amber-400" />
           </div>
           <div>
@@ -556,7 +693,251 @@ function LicenseCard({ sub, currentUserId }: { sub: Submission & { user: User };
             <Button
               size="sm"
               variant="outline"
-              className="text-xs border-primary/9one" : "Members only"}
+              className="text-xs border-primary/30 text-primary hover:bg-primary/10"
+              onClick={() => unlock.mutate()}
+              disabled={unlock.isPending}
+              data-testid={`button-unlock-license-${sub.id}`}
+            >
+              <Key className="w-3 h-3 mr-1" />
+              {unlock.isPending ? "Unlocking..." : "Unlock License"}
+            </Button>
+          )
+        )}
+        {isOwner && (
+          <span className="text-xs text-muted-foreground italic">Your beat</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function ProjectDetail() {
+  const { id } = useParams<{ id: string }>();
+  const projectId = parseInt(id || "0", 10);
+  const { data: project, isLoading } = useProject(projectId);
+  const { data: offerings } = useProjectOfferings(projectId);
+  const { user } = useAuth();
+
+  const createFile = useCreateFile(projectId);
+  const createInvestment = useCreateInvestment(projectId);
+  const createSubmission = useCreateSubmission(projectId);
+  const { playTrack, togglePlay, state: playerState, currentTrack } = usePlayer();
+
+  const [isFileOpen, setIsFileOpen] = useState(false);
+  const [fileName, setFileName] = useState("");
+  const [fileType, setFileType] = useState("stem");
+  const [fileVisibility, setFileVisibility] = useState<"private" | "public">("private");
+
+  const [isInvestOpen, setIsInvestOpen] = useState(false);
+  const [investAmount, setInvestAmount] = useState("");
+  const [investPercent, setInvestPercent] = useState("");
+
+  const [isSubmitOpen, setIsSubmitOpen] = useState(false);
+  const [subType, setSubType] = useState("");
+  const [subTitle, setSubTitle] = useState("");
+  const [subDesc, setSubDesc] = useState("");
+  const [subVisibility, setSubVisibility] = useState<"private" | "public">("private");
+  const [subLicenseAmount, setSubLicenseAmount] = useState("");
+  const [subClearancePercent, setSubClearancePercent] = useState("");
+
+  if (isLoading) return (
+    <div className="min-h-screen pt-24 px-8 flex items-center justify-center">
+      <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+    </div>
+  );
+  if (!project) return (
+    <div className="min-h-screen pt-24 px-8 text-center text-xl text-muted-foreground">
+      Project not found
+    </div>
+  );
+
+  const totalPercentage = project.investments.reduce((sum, inv) => sum + inv.percentage, 0);
+  const availablePercentage = 100 - totalPercentage;
+  const investorCount = project.investments.length;
+  const canInvest = investorCount < 3 && availablePercentage > 0;
+
+  const userRoles = user?.roles ?? [];
+  const allowedSubmissionTypes = getSubmissionTypesForRoles(userRoles);
+  const isCreator = user?.id === project.creatorId;
+  const hasOfferings = (offerings ?? []).length > 0;
+  const userHasNegotiableRole = hasNegotiableRole(userRoles);
+
+  const showLicenseFields = subType && PRODUCER_BEAT_TYPES.includes(subType);
+
+  const projectSubmissions = project.submissions ?? [];
+  const licensedSubmissions = projectSubmissions.filter(
+    s => s.licenseBestowalAmount && Number(s.licenseBestowalAmount) > 0
+  ) as (Submission & { user: User })[];
+
+  const handleFileUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const dummyUrl = `https://storage.producerscircle.mock/${Date.now()}_${fileName.replace(/\s+/g, '_')}`;
+    await createFile.mutateAsync({ name: fileName, type: fileType, url: dummyUrl, visibility: fileVisibility });
+    setIsFileOpen(false);
+    setFileName("");
+    setFileVisibility("private");
+  };
+
+  const handleInvest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await createInvestment.mutateAsync({
+      amount: parseFloat(investAmount),
+      percentage: parseInt(investPercent, 10),
+    });
+    setIsInvestOpen(false);
+    setInvestAmount("");
+    setInvestPercent("");
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await createSubmission.mutateAsync({
+      type: subType,
+      title: subTitle,
+      description: subDesc,
+      visibility: subVisibility,
+      licenseBestowalAmount: showLicenseFields && subLicenseAmount ? parseFloat(subLicenseAmount) : undefined,
+      sampleClearancePercent: showLicenseFields && subClearancePercent ? parseFloat(subClearancePercent) : undefined,
+    });
+    setIsSubmitOpen(false);
+    setSubType("");
+    setSubTitle("");
+    setSubDesc("");
+    setSubVisibility("private");
+    setSubLicenseAmount("");
+    setSubClearancePercent("");
+  };
+
+  const getFileIcon = (type: string) => {
+    if (type === 'stem') return <FileAudio className="w-5 h-5 text-primary" />;
+    if (type === 'artwork') return <FileImage className="w-5 h-5 text-accent" />;
+    return <FileCode className="w-5 h-5 text-muted-foreground" />;
+  };
+
+  const getSubmissionGroupIcon = (group: string) => {
+    if (group === "Beats & Production") return <Headphones className="w-4 h-4" />;
+    if (group === "Writing & Vocals") return <Mic2 className="w-4 h-4" />;
+    if (group === "Video & Marketing") return <Film className="w-4 h-4" />;
+    if (group === "Audio Engineering") return <SlidersHorizontal className="w-4 h-4" />;
+    if (group === "Performance") return <PersonStanding className="w-4 h-4" />;
+    return <Lightbulb className="w-4 h-4" />;
+  };
+
+  return (
+    <div className="min-h-screen pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-white transition-colors mb-8">
+        <ArrowLeft className="w-4 h-4" /> Back to Dashboard
+      </Link>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Left: Details, Submissions, Files, Circle Split */}
+        <div className="lg:col-span-2 space-y-8">
+          <div className="glass-panel rounded-3xl p-8 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-primary/10 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/3" />
+            <h1 className="text-4xl md:text-5xl font-display font-bold mb-4">{project.title}</h1>
+            <p className="text-lg text-muted-foreground leading-relaxed mb-6">{project.description}</p>
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10">
+                <span className="text-muted-foreground">Creator:</span>
+                <span className="font-medium text-white">{project.creator.username}</span>
+                {(project.creator.roles ?? []).map(r => <RoleBadge key={r} role={r} />)}
+              </div>
+              <div className="text-muted-foreground">
+                {project.createdAt ? format(new Date(project.createdAt), "MMMM d, yyyy") : ""}
+              </div>
+            </div>
+          </div>
+
+          {/* Tabs: Submissions, Files, Licenses, Circle Split */}
+          <Tabs defaultValue="submissions">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+              <TabsList className="bg-white/5 border border-white/10">
+                <TabsTrigger value="submissions" className="data-[state=active]:bg-white/10">
+                  Contributions ({projectSubmissions.length})
+                </TabsTrigger>
+                <TabsTrigger value="files" className="data-[state=active]:bg-white/10">
+                  Files ({project.files.length})
+                </TabsTrigger>
+                {licensedSubmissions.length > 0 && (
+                  <TabsTrigger value="licenses" className="data-[state=active]:bg-white/10 gap-1.5" data-testid="tab-licenses">
+                    <Banknote className="w-3.5 h-3.5" />
+                    Licenses ({licensedSubmissions.length})
+                  </TabsTrigger>
+                )}
+                <TabsTrigger value="split" className="data-[state=active]:bg-white/10 gap-1.5" data-testid="tab-circle-split">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Circle Split
+                </TabsTrigger>
+              </TabsList>
+
+              <div className="flex gap-2">
+                {/* Submit Contribution */}
+                {userRoles.length > 0 && (
+                  user?.isSubscribed ? (
+                  <Dialog open={isSubmitOpen} onOpenChange={setIsSubmitOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" size="sm" className="gap-2 border-white/10 hover:bg-white/5" data-testid="button-submit-contribution">
+                        <Plus className="w-4 h-4" /> Submit Idea
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="glass-panel border-white/10 sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Submit a Contribution</DialogTitle>
+                        <DialogDescription>Share your creative input for this project.</DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Contribution Type</label>
+                          <Select required value={subType} onValueChange={setSubType}>
+                            <SelectTrigger className="bg-background/50 border-white/10" data-testid="select-submission-type">
+                              <SelectValue placeholder="Select a type..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(SUBMISSION_TYPE_GROUPS).map(([group, types]) => {
+                                const available = types.filter(t => allowedSubmissionTypes.includes(t));
+                                if (available.length === 0) return null;
+                                return (
+                                  <SelectGroup key={group}>
+                                    <SelectLabel>{group}</SelectLabel>
+                                    {available.map(t => (
+                                      <SelectItem key={t} value={t} data-testid={`option-${t}`}>
+                                        {SUBMISSION_TYPE_LABELS[t] ?? t}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectGroup>
+                                );
+                              })}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Title</label>
+                          <Input
+                            required
+                            value={subTitle}
+                            onChange={e => setSubTitle(e.target.value)}
+                            placeholder="e.g. Midnight Hook Idea"
+                            className="bg-background/50 border-white/10"
+                            data-testid="input-submission-title"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Description</label>
+                          <Textarea
+                            value={subDesc}
+                            onChange={e => setSubDesc(e.target.value)}
+                            placeholder="Describe your idea, its energy, and how it fits the project..."
+                            className="bg-background/50 border-white/10 min-h-[80px]"
+                            data-testid="textarea-submission-desc"
+                          />
+                        </div>
+
+                        {/* Visibility toggle */}
+                        <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-white/[0.02]">
+                          <div>
+                            <p className="text-sm font-medium">Visibility</p>
+                            <p className="text-xs text-muted-foreground">
+                              {subVisibility === "public" ? "Visible to everyone" : "Members only"}
                             </p>
                           </div>
                           <button
@@ -984,4 +1365,3 @@ function LicenseCard({ sub, currentUserId }: { sub: Submission & { user: User };
     </div>
   );
 }
-8
