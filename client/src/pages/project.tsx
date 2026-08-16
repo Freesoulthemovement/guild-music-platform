@@ -1,4 +1,141 @@
-Name="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center">
+import { useParams } from "wouter";
+import { useState } from "react";
+import { useProject } from "@/hooks/use-projects";
+import { useCreateFile } from "@/hooks/use-files";
+import { useCreateInvestment } from "@/hooks/use-investments";
+import { useCreateSubmission } from "@/hooks/use-submissions";
+import { useCreateOffering, useProjectOfferings } from "@/hooks/use-offerings";
+import { useCoproducers, useSelectCoproducers } from "@/hooks/use-coproducers";
+import { useProjectNegotiations, useMyNegotiation, useSubmitNegotiation, useRespondNegotiation } from "@/hooks/use-negotiations";
+import { useProjectLaunchStatus, useUnlockLicense, useMyLicenseUnlock } from "@/hooks/use-license";
+import { useAuth } from "@/hooks/use-auth";
+import { usePlayer } from "@/context/player";
+import { AddToPlaylistMenu } from "@/components/add-to-playlist-menu";
+import { format } from "date-fns";
+import {
+  FileAudio, FileImage, FileCode, UploadCloud, TrendingUp, AlertCircle,
+  ArrowLeft, Plus, Headphones, Mic2, Heart, Lightbulb, Shuffle,
+  Crown, Sparkles, Star, Music2, DollarSign, Lock, Globe, EyeOff,
+  Film, SlidersHorizontal, PersonStanding, CheckCircle2, XCircle, ToggleLeft, ToggleRight,
+  Rocket, CheckCheck, Key, Banknote, Play, Pause,
+} from "lucide-react";
+import { Handshake } from "lucide-react";
+import { Link } from "wouter";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RoleBadge, SUBMISSION_TYPE_LABELS, getSubmissionTypesForRoles, hasNegotiableRole } from "@/components/role-badge";
+import type { Submission, User } from "@shared/schema";
+
+const SUBMISSION_TYPE_GROUPS = {
+  "Beats & Production": ["beat", "loop", "stem", "melody", "drum-kit", "collab-beat"],
+  "Writing & Vocals": ["hook", "song-concept", "verse", "theme", "song-title", "vocal-sample"],
+  "Creative Ideas": ["mood-board", "visual-idea", "narrative-idea", "challenge", "concept"],
+  "Video & Marketing": ["music-video-concept", "promo-asset", "social-media-pack", "visual-campaign"],
+  "Audio Engineering": ["mix", "master", "vocal-production", "sound-design"],
+  "Performance": ["choreography-concept", "performance-video", "acting-reel"],
+};
+
+const PRODUCER_BEAT_TYPES = ["beat", "loop", "stem", "melody", "drum-kit", "collab-beat"];
+
+const LAUNCH_CATEGORY_LABELS: Record<string, string> = {
+  producer: "Producer",
+  writer: "Writer",
+  supporter: "Supporter",
+  collaborator: "Collaborator",
+  videographer: "Videographer / Marketing",
+  engineer: "Recording Engineer",
+  dancer: "Dancer / Actor",
+  ministry: "Ministry",
+};
+
+const SPLIT_META: Record<string, { label: string; color: string; icon: typeof Mic2; description: string }> = {
+  artist:        { label: "Artist / Vocalist",   color: "bg-violet-500",  icon: Mic2,   description: "Master recording share (negotiable)" },
+  producers:     { label: "Producer(s)",          color: "bg-primary",     icon: Music2, description: "Investment equity % assigned per backer" },
+  "co-producers":{ label: "Co-Producers (3+4)",  color: "bg-amber-500",   icon: Star,   description: "3% Master each × 7 blessed creators" },
+  ministry:      { label: "Ministry Bestowal",    color: "bg-emerald-500", icon: Crown,  description: "Platform bestowal (Master) + optional 5% publishing admin" },
+};
+const SPLIT_ORDER = ["artist", "producers", "co-producers", "ministry"];
+
+type PersistedSplit = { role: string; percentage: string | number };
+
+function CircleSplitPanel({ royaltySplits }: { royaltySplits: PersistedSplit[] }) {
+  const splitMap = new Map(royaltySplits.map(s => [s.role, Number(s.percentage)]));
+  const fallback: Record<string, number> = { artist: 50, producers: 0, "co-producers": 21, ministry: 5 };
+
+  const splits = SPLIT_ORDER.map(role => {
+    const meta = SPLIT_META[role];
+    const percent = splitMap.has(role) ? splitMap.get(role)! : (fallback[role] ?? 0);
+    return { role, ...meta, percent };
+  });
+  const total = splits.reduce((sum, s) => sum + s.percent, 0);
+
+  return (
+    <div className="space-y-4" data-testid="circle-split-panel">
+      <div className="w-full h-3 rounded-full overflow-hidden flex gap-0.5" data-testid="split-bar">
+        {splits.map(s => (
+          <div
+            key={s.role}
+            className={`${s.color} h-full transition-all`}
+            style={{ width: `${(s.percent / 100) * 100}%` }}
+            title={`${s.role}: ${s.percent}%`}
+          />
+        ))}
+      </div>
+
+      <div className="space-y-3">
+        {splits.map(s => {
+          const Icon = s.icon;
+          return (
+            <div key={s.role} className="flex items-start gap-3" data-testid={`split-row-${s.role.toLowerCase().replace(/[\s/()]+/g, '-')}`}>
+              <div className={`w-3 h-3 rounded-sm mt-0.5 flex-shrink-0 ${s.color}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium flex items-center gap-1.5">
+                    <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+                    {s.role}
+                  </span>
+                  <span className="text-sm font-mono font-bold tabular-nums">{s.percent}%</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">{s.description}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="pt-2 border-t border-white/5 flex justify-between text-xs text-muted-foreground">
+        <span>Displayed total</span>
+        <span className="font-mono">{total}% Master</span>
+      </div>
+      <p className="text-xs text-muted-foreground/60 italic">
+        Remaining {100 - total}% reserved for artist negotiation, publishing splits & unclaimed shares.
+      </p>
+    </div>
+  );
+}
+
+function CoproducerPanel({
+  isCreator,
+  projectId,
+  hasOfferings,
+}: {
+  isCreator: boolean;
+  projectId: number;
+  hasOfferings: boolean;
+}) {
+  const { data: coproducers = [] } = useCoproducers(projectId);
+  const selectCoproducers = useSelectCoproducers(projectId);
+  const selected = coproducers.length > 0;
+
+  return (
+    <div className="glass-panel rounded-3xl p-6" data-testid="coproducer-panel">
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center">
             <Star className="w-4 h-4 text-amber-400" />
           </div>
           <div>
