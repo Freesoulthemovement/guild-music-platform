@@ -68,4 +68,3 @@ export function useCreateSubmission(projectId: number) {
     },
   });
 }
-8

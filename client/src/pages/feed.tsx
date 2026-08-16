@@ -159,4 +159,3 @@ export default function FeedPage() {
     </div>
   );
 }
-8

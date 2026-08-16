@@ -55,4 +55,3 @@ export const queryClient = new QueryClient({
     },
   },
 });
-8

@@ -47,4 +47,3 @@ async function seedProducersCircle() {
 }
 
 seedProducersCircle();
-8

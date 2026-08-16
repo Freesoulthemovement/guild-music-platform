@@ -372,4 +372,3 @@ export function OnboardingModal({ isOpen, isAlreadySubscribed = false, onAgreeme
     </div>
   );
 }
-8

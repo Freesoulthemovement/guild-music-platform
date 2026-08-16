@@ -15,4 +15,3 @@ export class WebhookHandlers {
     await sync.processWebhook(payload, signature);
   }
 }
-8
