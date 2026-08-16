@@ -1,3 +1,4 @@
+import type Stripe from "stripe";
 import type { Express } from "express";
 import { type Server } from "http";
 import { storage } from "./storage";
@@ -5,22 +6,49 @@ import { api } from "@shared/routes";
 import { ROLES } from "@shared/schema";
 import { z } from "zod";
 import session from "express-session";
-import MemoryStore from "memorystore";
+import connectPgSimple from "connect-pg-simple";
+import { pool } from "./db";
 import { WebhookHandlers } from "./webhookHandlers";
-import { getUncachableStripeClient } from "./stripeClient";
+import { getStripeClient, getConfiguredPriceId } from "./stripeClient";
 
-const SessionStore = MemoryStore(session);
+const PgSession = connectPgSimple(session);
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express,
 ): Promise<Server> {
+  const isProduction = process.env.NODE_ENV === "production";
+  const sessionSecret = process.env.SESSION_SECRET;
+
+  // A predictable secret lets anyone forge a session cookie, so refuse to boot
+  // with the development fallback in production.
+  if (isProduction && !sessionSecret) {
+    throw new Error(
+      "SESSION_SECRET must be set in production. Generate one with: openssl rand -hex 32",
+    );
+  }
+
   app.use(
     session({
-      secret: process.env.SESSION_SECRET || "dev_secret",
+      secret: sessionSecret || "dev_secret",
       resave: false,
       saveUninitialized: false,
-      store: new SessionStore({ checkPeriod: 86400000 }),
+      // Postgres-backed so sessions survive restarts and deploys. MemoryStore
+      // dropped every login on restart and leaked memory over time.
+      store: new PgSession({
+        pool,
+        tableName: "user_sessions",
+        // The table is defined in shared/schema.ts and created by db:push.
+        // connect-pg-simple's own creation path reads a table.sql from its
+        // package directory, which does not exist inside the esbuild bundle.
+        createTableIfMissing: false,
+      }),
+      cookie: {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: "lax",
+        maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+      },
     }),
   );
 
@@ -675,53 +703,60 @@ export async function registerRoutes(
     if (!signature)
       return res.status(400).json({ error: "Missing stripe-signature" });
     const sig = Array.isArray(signature) ? signature[0] : signature;
+
+    // Verify first. A bad signature means the payload is untrusted and must
+    // not be acted on, so this is a 400 with no side effects.
+    let event: Stripe.Event;
     try {
-      const raw = (req as any).rawBody;
-      // stripe-replit-sync verifies signature and syncs Stripe data to stripe schema tables
-      await WebhookHandlers.processWebhook(raw as Buffer, sig);
-      // Also handle Stripe lifecycle events to keep our user state accurate
-      try {
-        const event = JSON.parse(raw.toString());
-        if (event.type === "checkout.session.completed") {
-          const session = event.data?.object;
-          const userId = session?.client_reference_id
-            ? Number(session.client_reference_id)
-            : NaN;
-          if (!isNaN(userId) && userId > 0) {
-            await storage.updateUserSubscription(userId, true);
-            const existingUser = await storage.getUser(userId);
-            if (existingUser && !existingUser.onboardingComplete) {
-              await storage.updateUserOnboarding(userId, new Date());
-            }
-          }
-        } else if (event.type === "customer.subscription.deleted") {
-          const sub = event.data?.object;
-          const customerId =
-            typeof sub?.customer === "string" ? sub.customer : null;
-          if (customerId) {
-            const user = await storage.getUserByStripeCustomerId(customerId);
-            if (user) await storage.updateUserSubscription(user.id, false);
-          }
-        } else if (event.type === "customer.subscription.updated") {
-          const sub = event.data?.object;
-          const customerId =
-            typeof sub?.customer === "string" ? sub.customer : null;
-          const status: string | undefined = sub?.status;
-          if (customerId && status) {
-            const user = await storage.getUserByStripeCustomerId(customerId);
-            if (user) {
-              const active = status === "active" || status === "trialing";
-              await storage.updateUserSubscription(user.id, active);
-            }
+      event = await WebhookHandlers.constructEvent(
+        (req as any).rawBody as Buffer,
+        sig,
+      );
+    } catch (err: any) {
+      console.error("Webhook signature verification failed:", err.message);
+      return res.status(400).json({ error: "Invalid signature" });
+    }
+
+    // Handling failures return 500 so Stripe retries. Returning 200 here would
+    // silently strand a paying member without access.
+    try {
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const userId = session.client_reference_id
+          ? Number(session.client_reference_id)
+          : NaN;
+        if (!isNaN(userId) && userId > 0) {
+          await storage.updateUserSubscription(userId, true);
+          const existingUser = await storage.getUser(userId);
+          if (existingUser && !existingUser.onboardingComplete) {
+            await storage.updateUserOnboarding(userId, new Date());
           }
         }
-      } catch (parseErr: any) {
-        console.error("Webhook app-logic error:", parseErr.message);
+      } else if (event.type === "customer.subscription.deleted") {
+        const sub = event.data.object as Stripe.Subscription;
+        const customerId =
+          typeof sub.customer === "string" ? sub.customer : null;
+        if (customerId) {
+          const user = await storage.getUserByStripeCustomerId(customerId);
+          if (user) await storage.updateUserSubscription(user.id, false);
+        }
+      } else if (event.type === "customer.subscription.updated") {
+        const sub = event.data.object as Stripe.Subscription;
+        const customerId =
+          typeof sub.customer === "string" ? sub.customer : null;
+        const status: string | undefined = sub.status;
+        if (customerId && status) {
+          const user = await storage.getUserByStripeCustomerId(customerId);
+          if (user) {
+            const active = status === "active" || status === "trialing";
+            await storage.updateUserSubscription(user.id, active);
+          }
+        }
       }
       res.status(200).json({ received: true });
     } catch (err: any) {
-      console.error("Webhook error:", err.message);
-      res.status(400).json({ error: "Webhook processing error" });
+      console.error("Webhook handling error:", err.message);
+      res.status(500).json({ error: "Webhook handling failed" });
     }
   });
 
@@ -733,26 +768,34 @@ export async function registerRoutes(
       const user = await storage.getUser(req.session.userId);
       if (!user) return res.status(401).json({ message: "User not found" });
 
-      const stripe = await getUncachableStripeClient();
+      const stripe = await getStripeClient();
 
-      // Find the $8.88/month price for Producers Circle Pro
-      const priceSearch = await stripe.prices.search({
-        query: "active:'true' AND type:'recurring'",
-        expand: ["data.product"],
-        limit: 20,
-      });
-      const circlePrice = priceSearch.data.find((p) => {
-        const prod = p.product as any;
-        return (
-          typeof prod === "object" && prod?.name === "Producers Circle Pro"
-        );
-      });
-      if (!circlePrice) {
+      // Prefer an explicitly configured price. Stripe's search index is
+      // eventually consistent, so looking a price up by product name can miss
+      // one that was just created — fine for dev, not for a live checkout.
+      const configuredPriceId = getConfiguredPriceId();
+      let priceId: string | undefined = configuredPriceId;
+
+      if (!priceId) {
+        const priceSearch = await stripe.prices.search({
+          query: "active:'true' AND type:'recurring'",
+          expand: ["data.product"],
+          limit: 20,
+        });
+        priceId = priceSearch.data.find((p) => {
+          const prod = p.product as any;
+          return (
+            typeof prod === "object" && prod?.name === "Producers Circle Pro"
+          );
+        })?.id;
+      }
+
+      if (!priceId) {
         return res
           .status(503)
           .json({
             message:
-              "Subscription product not configured. Please run the seed script first.",
+              "Subscription product not configured. Set STRIPE_PRICE_ID, or run the seed script to create the Producers Circle Pro product.",
           });
       }
 
@@ -771,7 +814,7 @@ export async function registerRoutes(
       const session = await stripe.checkout.sessions.create({
         customer: customerId,
         payment_method_types: ["card"],
-        line_items: [{ price: circlePrice.id, quantity: 1 }],
+        line_items: [{ price: priceId, quantity: 1 }],
         mode: "subscription",
         success_url: `${baseUrl}/?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${baseUrl}/account`,
@@ -795,7 +838,7 @@ export async function registerRoutes(
         .status(400)
         .json({ message: "No billing account found. Please subscribe first." });
     try {
-      const stripe = await getUncachableStripeClient();
+      const stripe = await getStripeClient();
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const portalSession = await stripe.billingPortal.sessions.create({
         customer: user.stripeCustomerId,
@@ -841,7 +884,7 @@ export async function registerRoutes(
       const user = await storage.getUser(req.session.userId);
       if (!user?.stripeCustomerId)
         return res.status(200).json({ status: "none" });
-      const stripe = await getUncachableStripeClient();
+      const stripe = await getStripeClient();
       const subscriptions = await stripe.subscriptions.list({
         customer: user.stripeCustomerId,
         limit: 1,
@@ -870,7 +913,7 @@ export async function registerRoutes(
     if (!sessionId)
       return res.status(400).json({ message: "sessionId required" });
     try {
-      const stripe = await getUncachableStripeClient();
+      const stripe = await getStripeClient();
       const checkoutSession =
         await stripe.checkout.sessions.retrieve(sessionId);
       // Security: ensure this checkout session was created for the current user

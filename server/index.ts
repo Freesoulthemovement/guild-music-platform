@@ -2,11 +2,14 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { runMigrations } from "stripe-replit-sync";
-import { getStripeSync } from "./stripeClient";
 
 const app = express();
 const httpServer = createServer(app);
+
+// Required for secure cookies and correct req.protocol behind a hosting proxy
+// (Render, Railway, Fly, nginx). Without it Express sees plain http and will
+// refuse to set a `secure` session cookie.
+app.set("trust proxy", 1);
 
 declare module "http" {
   interface IncomingMessage {
@@ -62,18 +65,15 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Initialize Stripe schema and sync (non-blocking — app still serves if Stripe not connected)
-  try {
-    const databaseUrl = process.env.DATABASE_URL;
-    if (databaseUrl) {
-      await runMigrations({ databaseUrl });
-      const stripeSync = await getStripeSync();
-      const webhookBaseUrl = `https://${process.env.REPLIT_DOMAINS?.split(',')[0]}`;
-      await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
-      stripeSync.syncBackfill().catch(err => console.error('Stripe backfill error:', err));
-    }
-  } catch (err: any) {
-    console.warn('[Stripe] Not connected or not configured:', err.message);
+  // The webhook endpoint is registered manually in the Stripe dashboard and
+  // verified per-request with STRIPE_WEBHOOK_SECRET, so there is nothing to
+  // bootstrap here. Warn early if Stripe is not configured — the app still
+  // serves, but checkout, the billing portal and webhooks will return errors.
+  if (!process.env.STRIPE_SECRET_KEY) {
+    log("STRIPE_SECRET_KEY not set — billing endpoints will fail", "stripe");
+  }
+  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+    log("STRIPE_WEBHOOK_SECRET not set — incoming webhooks will be rejected", "stripe");
   }
 
   await registerRoutes(httpServer, app);

@@ -1,65 +1,46 @@
 import Stripe from 'stripe';
-import { StripeSync } from 'stripe-replit-sync';
 
-async function getStripeCredentials(): Promise<{ secretKey: string; webhookSecret?: string }> {
-  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-  const xReplitToken = process.env.REPL_IDENTITY
-    ? "repl " + process.env.REPL_IDENTITY
-    : process.env.WEB_REPL_RENEWAL
-      ? "depl " + process.env.WEB_REPL_RENEWAL
-      : null;
-
-  if (!hostname || !xReplitToken) {
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
     throw new Error(
-      'Missing Replit environment variables. ' +
-      'Ensure the Stripe integration is connected via the Integrations tab.'
+      `${name} is not set. Add it to the environment before using Stripe. ` +
+      `See .env.example for the full list of required variables.`
     );
   }
-
-  const resp = await fetch(
-    `https://${hostname}/api/v2/connection?include_secrets=true&connector_names=stripe`,
-    {
-      headers: { Accept: "application/json", X_REPLIT_TOKEN: xReplitToken },
-      signal: AbortSignal.timeout(10_000),
-    }
-  );
-
-  if (!resp.ok) {
-    throw new Error(`Failed to fetch Stripe credentials: ${resp.status} ${resp.statusText}`);
-  }
-
-  const data = await resp.json();
-  const settings = data.items?.[0]?.settings;
-
-  const secretKey = settings?.secret_key ?? settings?.secret;
-  if (!secretKey) {
-    throw new Error(
-      'Stripe integration not connected or missing secret key. ' +
-      'Connect Stripe via the Integrations tab first.'
-    );
-  }
-
-  return {
-    secretKey,
-    webhookSecret: settings?.webhook_secret ?? settings?.webhook_signing_secret,
-  };
+  return value;
 }
 
-export async function getUncachableStripeClient(): Promise<Stripe> {
-  const { secretKey } = await getStripeCredentials();
-  return new Stripe(secretKey);
+let cachedClient: Stripe | null = null;
+
+/**
+ * Stripe client built from STRIPE_SECRET_KEY.
+ *
+ * The key is static, so the client is created once and reused. Throws if the
+ * key is missing — callers are expected to surface that as a 5xx rather than
+ * crash the process, so the rest of the app keeps serving when Stripe is not
+ * yet configured.
+ */
+export async function getStripeClient(): Promise<Stripe> {
+  if (!cachedClient) {
+    cachedClient = new Stripe(requireEnv('STRIPE_SECRET_KEY'));
+  }
+  return cachedClient;
 }
 
-export async function getStripeSync(): Promise<StripeSync> {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error('DATABASE_URL environment variable is required');
-  }
+/**
+ * Signing secret for the webhook endpoint registered in the Stripe dashboard
+ * (Developers -> Webhooks -> your endpoint -> Signing secret).
+ */
+export function getStripeWebhookSecret(): string {
+  return requireEnv('STRIPE_WEBHOOK_SECRET');
+}
 
-  const { secretKey, webhookSecret } = await getStripeCredentials();
-  return new StripeSync({
-    poolConfig: { connectionString: databaseUrl },
-    stripeSecretKey: secretKey,
-    stripeWebhookSecret: webhookSecret ?? '',
-  });
+/**
+ * Optional. When set, the checkout route uses this price directly instead of
+ * searching for one by product name. Preferred in production: price search is
+ * eventually consistent and can miss a just-created price.
+ */
+export function getConfiguredPriceId(): string | undefined {
+  return process.env.STRIPE_PRICE_ID || undefined;
 }

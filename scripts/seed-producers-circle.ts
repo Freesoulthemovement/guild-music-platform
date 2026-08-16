@@ -1,8 +1,8 @@
-import { getUncachableStripeClient } from '../server/stripeClient';
+import { getStripeClient } from '../server/stripeClient';
 
 async function seedProducersCircle() {
   try {
-    const stripe = await getUncachableStripeClient();
+    const stripe = await getStripeClient();
 
     console.log('Checking for existing Producers Circle Pro product...');
     const existing = await stripe.products.search({

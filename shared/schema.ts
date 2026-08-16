@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, numeric, varchar, json, index } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -40,6 +40,22 @@ export type Visibility = typeof VISIBILITY[number];
 export const LAUNCH_GOAL = 300;
 export const LAUNCH_CATEGORIES = ["producer", "writer", "supporter", "collaborator", "videographer", "engineer", "dancer", "ministry"] as const;
 export type LaunchCategory = typeof LAUNCH_CATEGORIES[number];
+
+/**
+ * Session store for express-session via connect-pg-simple.
+ *
+ * Declared here so `npm run db:push` creates it alongside everything else.
+ * connect-pg-simple can create this itself, but only by reading a table.sql
+ * from its own package directory — which does not survive the esbuild bundle
+ * in production. No application code reads or writes this table.
+ */
+export const userSessions = pgTable("user_sessions", {
+  sid: varchar("sid").primaryKey(),
+  sess: json("sess").notNull(),
+  expire: timestamp("expire", { precision: 6 }).notNull(),
+}, (table) => ({
+  expireIdx: index("IDX_user_sessions_expire").on(table.expire),
+}));
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
