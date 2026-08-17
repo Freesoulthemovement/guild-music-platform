@@ -3,9 +3,9 @@ import { eq, inArray, desc, and, sql, or, ne } from "drizzle-orm";
 import {
   users, projects, files, investments, submissions, offerings, coproducers, royaltySplits,
   events, donations, cypherPasses, votes, contributionNegotiations, licenseUnlocks,
-  follows, messages, playlists, playlistTracks, userCredentials,
+  follows, messages, playlists, playlistTracks, userCredentials, authTokens,
   type User, type InsertUser,
-  type UserCredential,
+  type UserCredential, type AuthTokenPurpose,
   type Project, type InsertProject,
   type File, type InsertFile,
   type Investment, type InsertInvestment,
@@ -87,6 +87,12 @@ export interface IStorage {
   getCredentialByUserId(userId: number): Promise<UserCredential | undefined>;
   createCredential(userId: number, email: string, passwordHash: string): Promise<UserCredential>;
   updatePassword(userId: number, passwordHash: string): Promise<void>;
+  markEmailVerified(userId: number): Promise<void>;
+
+  // Single-use emailed tokens (password reset, email verification)
+  createAuthToken(userId: number, purpose: AuthTokenPurpose, tokenHash: string, expiresAt: Date): Promise<void>;
+  consumeAuthToken(tokenHash: string, purpose: AuthTokenPurpose): Promise<number | undefined>;
+  invalidateAuthTokens(userId: number, purpose: AuthTokenPurpose): Promise<void>;
   updateUserSubscription(id: number, isSubscribed: boolean): Promise<User>;
   updateUserRoles(id: number, roles: string[]): Promise<User>;
   updateUserOnboarding(id: number, agreedAt: Date): Promise<User>;
@@ -238,6 +244,63 @@ export class DatabaseStorage implements IStorage {
       .update(userCredentials)
       .set({ passwordHash, updatedAt: new Date() })
       .where(eq(userCredentials.userId, userId));
+  }
+
+  async markEmailVerified(userId: number): Promise<void> {
+    await db
+      .update(userCredentials)
+      .set({ emailVerifiedAt: new Date(), updatedAt: new Date() })
+      .where(eq(userCredentials.userId, userId));
+  }
+
+  // ── Emailed tokens ──────────────────────────────────────────────────────────
+
+  async createAuthToken(
+    userId: number,
+    purpose: AuthTokenPurpose,
+    tokenHash: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await db.insert(authTokens).values({ userId, purpose, tokenHash, expiresAt });
+  }
+
+  /**
+   * Atomically claims a token and returns its user id.
+   *
+   * The used_at guard is part of the UPDATE rather than a separate read, so two
+   * concurrent requests with the same link cannot both succeed.
+   */
+  async consumeAuthToken(
+    tokenHash: string,
+    purpose: AuthTokenPurpose,
+  ): Promise<number | undefined> {
+    const [claimed] = await db
+      .update(authTokens)
+      .set({ usedAt: new Date() })
+      .where(
+        and(
+          eq(authTokens.tokenHash, tokenHash),
+          eq(authTokens.purpose, purpose),
+          sql`${authTokens.usedAt} IS NULL`,
+          sql`${authTokens.expiresAt} > now()`,
+        ),
+      )
+      .returning();
+    return claimed?.userId;
+  }
+
+  /** Burns any outstanding tokens, e.g. after a successful reset. */
+  async invalidateAuthTokens(userId: number, purpose: AuthTokenPurpose): Promise<void> {
+    await db
+      .update(authTokens)
+      .set({ usedAt: new Date() })
+      .where(
+        and(
+          eq(authTokens.userId, userId),
+          eq(authTokens.purpose, purpose),
+          sql`${authTokens.usedAt} IS NULL`,
+        ),
+      );
   }
 
   async updateUserSubscription(id: number, isSubscribed: boolean): Promise<User> {

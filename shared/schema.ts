@@ -83,9 +83,33 @@ export const userCredentials = pgTable("user_credentials", {
   userId: integer("user_id").primaryKey(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  emailVerifiedAt: timestamp("email_verified_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+export const AUTH_TOKEN_PURPOSES = ["password_reset", "email_verification"] as const;
+export type AuthTokenPurpose = typeof AUTH_TOKEN_PURPOSES[number];
+
+/**
+ * Single-use tokens emailed to a member.
+ *
+ * Only the SHA-256 of the token is stored, so a database leak does not let an
+ * attacker reset anyone's password — the raw value exists solely in the email.
+ */
+export const authTokens = pgTable("auth_tokens", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  purpose: text("purpose").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const authTokensRelations = relations(authTokens, ({ one }) => ({
+  user: one(users, { fields: [authTokens.userId], references: [users.id] }),
+}));
 
 export const userCredentialsRelations = relations(userCredentials, ({ one }) => ({
   user: one(users, { fields: [userCredentials.userId], references: [users.id] }),

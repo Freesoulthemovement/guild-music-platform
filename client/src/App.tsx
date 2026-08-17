@@ -23,6 +23,8 @@ import ProfilePage from "@/pages/profile";
 import FeedPage from "@/pages/feed";
 import MessagesPage from "@/pages/messages";
 import PlaylistsPage from "@/pages/playlists";
+import ResetPasswordPage from "@/pages/reset-password";
+import VerifyEmailPage from "@/pages/verify-email";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { user, isLoading } = useAuth();
@@ -111,6 +113,9 @@ function Router() {
         <Route path="/profile/:username">
           <ProtectedRoute component={ProfilePage} />
         </Route>
+        {/* Public: reachable from an emailed link without being signed in */}
+        <Route path="/reset-password" component={ResetPasswordPage} />
+        <Route path="/verify-email" component={VerifyEmailPage} />
         <Route path="/charter" component={Charter} />
         <Route component={NotFound} />
       </Switch>

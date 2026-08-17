@@ -47,6 +47,46 @@ export const api = {
         401: errorSchemas.unauthorized,
       }
     },
+    forgotPassword: {
+      method: 'POST' as const,
+      path: '/api/auth/forgot-password' as const,
+      input: z.object({ email: emailSchema }),
+      responses: {
+        // Always 200, even for an unknown address, so the response cannot be
+        // used to discover which emails have accounts.
+        200: z.object({ message: z.string() }),
+        400: errorSchemas.validation,
+      }
+    },
+    resetPassword: {
+      method: 'POST' as const,
+      path: '/api/auth/reset-password' as const,
+      input: z.object({
+        token: z.string().min(1, "Reset token is required"),
+        newPassword: passwordSchema,
+      }),
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        400: errorSchemas.validation,
+      }
+    },
+    sendVerification: {
+      method: 'POST' as const,
+      path: '/api/auth/send-verification' as const,
+      responses: {
+        200: z.object({ message: z.string() }),
+        401: errorSchemas.unauthorized,
+      }
+    },
+    verifyEmail: {
+      method: 'POST' as const,
+      path: '/api/auth/verify-email' as const,
+      input: z.object({ token: z.string().min(1) }),
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        400: errorSchemas.validation,
+      }
+    },
     changePassword: {
       method: 'POST' as const,
       path: '/api/auth/change-password' as const,

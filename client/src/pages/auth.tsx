@@ -12,10 +12,21 @@ export default function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
-  const { login, isLoggingIn, register, isRegistering } = useAuth();
+  const [resetSent, setResetSent] = useState<string | null>(null);
+  const { login, isLoggingIn, register, isRegistering, forgotPassword, isSendingReset } = useAuth();
 
   const isRegisterMode = mode === "register";
   const isBusy = isLoggingIn || isRegistering;
+
+  const handleForgotPassword = async () => {
+    if (!email.trim() || isSendingReset) return;
+    try {
+      const result = await forgotPassword(email.trim());
+      setResetSent(result.message);
+    } catch {
+      /* toast handled in the mutation */
+    }
+  };
 
   const canSubmit =
     email.trim().length > 0 &&
@@ -155,7 +166,29 @@ export default function AuthPage() {
                     {MIN_PASSWORD_LENGTH - password.length === 1 ? "" : "s"} needed
                   </p>
                 )}
+                {!isRegisterMode && (
+                  <div className="text-right">
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      disabled={!email.trim() || isSendingReset}
+                      className="text-xs text-muted-foreground hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      data-testid="button-forgot-password"
+                    >
+                      {isSendingReset ? "Sending..." : "Forgot password?"}
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {resetSent && (
+                <div
+                  className="p-3 rounded-xl border border-primary/20 bg-primary/5 text-xs text-primary"
+                  data-testid="reset-sent-notice"
+                >
+                  {resetSent}
+                </div>
+              )}
 
               <button
                 type="submit"

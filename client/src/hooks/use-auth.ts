@@ -68,6 +68,50 @@ export function useAuth() {
     }
   });
 
+  const forgotPasswordMutation = useMutation({
+    mutationFn: async (email: string) => {
+      const payload = api.auth.forgotPassword.input.parse({ email });
+      const res = await fetch(api.auth.forgotPassword.path, {
+        method: api.auth.forgotPassword.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Request failed" }));
+        throw new Error(err.message || "Request failed");
+      }
+      return res.json() as Promise<{ message: string }>;
+    },
+    onError: (err: Error) => {
+      toast({ title: "Could not send reset link", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: async (data: { token: string; newPassword: string }) => {
+      const payload = api.auth.resetPassword.input.parse(data);
+      const res = await fetch(api.auth.resetPassword.path, {
+        method: api.auth.resetPassword.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Reset failed" }));
+        throw new Error(err.message || "Reset failed");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.auth.me.path] });
+      toast({ title: "Password Reset", description: "You are now signed in." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Could not reset password", description: err.message, variant: "destructive" });
+    },
+  });
+
   const changePasswordMutation = useMutation({
     mutationFn: async (data: { currentPassword: string; newPassword: string }) => {
       const payload = api.auth.changePassword.input.parse(data);
@@ -157,6 +201,10 @@ export function useAuth() {
     isRegistering: registerMutation.isPending,
     changePassword: changePasswordMutation.mutateAsync,
     isChangingPassword: changePasswordMutation.isPending,
+    forgotPassword: forgotPasswordMutation.mutateAsync,
+    isSendingReset: forgotPasswordMutation.isPending,
+    resetPassword: resetPasswordMutation.mutateAsync,
+    isResettingPassword: resetPasswordMutation.isPending,
     logout: logoutMutation.mutateAsync,
     verifyStripeSession: verifyStripeSessionMutation.mutateAsync,
     isVerifyingSession: verifyStripeSessionMutation.isPending,

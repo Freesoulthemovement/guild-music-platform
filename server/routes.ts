@@ -12,6 +12,20 @@ import { pool } from "./db";
 import { WebhookHandlers } from "./webhookHandlers";
 import { getStripeClient, getConfiguredPriceId } from "./stripeClient";
 import { hashPassword, verifyPassword, dummyVerify } from "./password";
+import {
+  createToken,
+  hashToken,
+  expiresInMinutes,
+  expiresInHours,
+  PASSWORD_RESET_TTL_MINUTES,
+  EMAIL_VERIFICATION_TTL_HOURS,
+} from "./tokens";
+import {
+  sendEmail,
+  appBaseUrl,
+  passwordResetEmail,
+  verifyEmailEmail,
+} from "./email";
 
 const PgSession = connectPgSimple(session);
 
@@ -28,6 +42,16 @@ const authWriteLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: false,
   message: { message: "Too many attempts. Please try again in a few minutes." },
+});
+
+// Tighter, and counts successes too: each request sends an email, so this caps
+// how far someone can spam a member's inbox by replaying the form.
+const passwordResetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { message: "Too many requests. Please try again later." },
 });
 
 /**
@@ -169,6 +193,142 @@ export async function registerRoutes(
         res.status(400).json({ message: err.errors[0].message });
       else {
         console.error("Login error:", err);
+        res.status(500).json({ message: "Internal error" });
+      }
+    }
+  });
+
+  app.post(api.auth.forgotPassword.path, passwordResetLimiter, async (req, res) => {
+    // Always the same reply. Whether an account exists must not be observable.
+    const genericReply = {
+      message: "If that email has an account, a reset link is on its way.",
+    };
+    try {
+      const { email } = api.auth.forgotPassword.input.parse(req.body);
+      const credential = await storage.getCredentialByEmail(email);
+
+      if (credential) {
+        // Only the newest link should work.
+        await storage.invalidateAuthTokens(credential.userId, "password_reset");
+
+        const { token, tokenHash } = createToken();
+        await storage.createAuthToken(
+          credential.userId,
+          "password_reset",
+          tokenHash,
+          expiresInMinutes(PASSWORD_RESET_TTL_MINUTES),
+        );
+
+        const base = appBaseUrl(`${req.protocol}://${req.get("host")}`);
+        const url = `${base}/reset-password?token=${encodeURIComponent(token)}`;
+        try {
+          await sendEmail({
+            to: credential.email,
+            ...passwordResetEmail(url, PASSWORD_RESET_TTL_MINUTES),
+          });
+        } catch (err) {
+          // Log, but keep the reply identical — a delivery outage must not
+          // become an account-existence oracle.
+          console.error("Password reset email failed to send:", err);
+        }
+      }
+
+      res.status(200).json(genericReply);
+    } catch (err) {
+      if (err instanceof z.ZodError)
+        res.status(400).json({ message: err.errors[0].message });
+      else {
+        console.error("Forgot password error:", err);
+        res.status(200).json(genericReply);
+      }
+    }
+  });
+
+  app.post(api.auth.resetPassword.path, authWriteLimiter, async (req, res) => {
+    try {
+      const { token, newPassword } = api.auth.resetPassword.input.parse(req.body);
+
+      const userId = await storage.consumeAuthToken(
+        hashToken(token),
+        "password_reset",
+      );
+      if (!userId) {
+        return res
+          .status(400)
+          .json({ message: "That reset link is invalid or has expired" });
+      }
+
+      await storage.updatePassword(userId, await hashPassword(newPassword));
+      // Any other outstanding links are now void.
+      await storage.invalidateAuthTokens(userId, "password_reset");
+      // Log the member in on the new password, with a fresh session id.
+      await startSession(req, userId);
+
+      res.status(200).json({ success: true });
+    } catch (err) {
+      if (err instanceof z.ZodError)
+        res.status(400).json({ message: err.errors[0].message });
+      else {
+        console.error("Reset password error:", err);
+        res.status(500).json({ message: "Internal error" });
+      }
+    }
+  });
+
+  app.post(api.auth.sendVerification.path, passwordResetLimiter, async (req, res) => {
+    if (!req.session?.userId)
+      return res.status(401).json({ message: "Not logged in" });
+
+    const credential = await storage.getCredentialByUserId(req.session.userId);
+    if (!credential || credential.emailVerifiedAt) {
+      return res.status(200).json({ message: "Your email is already confirmed." });
+    }
+
+    await storage.invalidateAuthTokens(credential.userId, "email_verification");
+    const { token, tokenHash } = createToken();
+    await storage.createAuthToken(
+      credential.userId,
+      "email_verification",
+      tokenHash,
+      expiresInHours(EMAIL_VERIFICATION_TTL_HOURS),
+    );
+
+    const base = appBaseUrl(`${req.protocol}://${req.get("host")}`);
+    const url = `${base}/verify-email?token=${encodeURIComponent(token)}`;
+    try {
+      await sendEmail({
+        to: credential.email,
+        ...verifyEmailEmail(url, EMAIL_VERIFICATION_TTL_HOURS),
+      });
+    } catch (err) {
+      console.error("Verification email failed to send:", err);
+      return res
+        .status(200)
+        .json({ message: "Could not send just now — please try again shortly." });
+    }
+
+    res.status(200).json({ message: "Confirmation email sent." });
+  });
+
+  app.post(api.auth.verifyEmail.path, async (req, res) => {
+    try {
+      const { token } = api.auth.verifyEmail.input.parse(req.body);
+      const userId = await storage.consumeAuthToken(
+        hashToken(token),
+        "email_verification",
+      );
+      if (!userId) {
+        return res
+          .status(400)
+          .json({ message: "That confirmation link is invalid or has expired" });
+      }
+      await storage.markEmailVerified(userId);
+      res.status(200).json({ success: true });
+    } catch (err) {
+      if (err instanceof z.ZodError)
+        res.status(400).json({ message: err.errors[0].message });
+      else {
+        console.error("Verify email error:", err);
         res.status(500).json({ message: "Internal error" });
       }
     }
