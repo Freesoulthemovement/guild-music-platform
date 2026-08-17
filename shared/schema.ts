@@ -71,6 +71,26 @@ export const users = pgTable("users", {
   roles: text("roles").array().default([]),
 });
 
+/**
+ * Login credentials, deliberately kept off the users table.
+ *
+ * User rows are serialized all over the API — nested inside projects,
+ * submissions, co-producers, negotiations, feed items and messages. Keeping
+ * the email and password hash in a separate table means no existing response
+ * path can leak them by accident, and only the auth routes ever read this.
+ */
+export const userCredentials = pgTable("user_credentials", {
+  userId: integer("user_id").primaryKey(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const userCredentialsRelations = relations(userCredentials, ({ one }) => ({
+  user: one(users, { fields: [userCredentials.userId], references: [users.id] }),
+}));
+
 export const projects = pgTable("projects", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
@@ -373,3 +393,31 @@ export type Follow = typeof follows.$inferSelect;
 export type InsertFollow = z.infer<typeof insertFollowSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type UserCredential = typeof userCredentials.$inferSelect;
+
+// ── Auth input rules ──────────────────────────────────────────────────────────
+
+export const MIN_PASSWORD_LENGTH = 10;
+
+export const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email("Enter a valid email address")
+  .max(254);
+
+export const passwordSchema = z
+  .string()
+  .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+  // Capped so an enormous input cannot tie up the hashing work function.
+  .max(200, "Password must be at most 200 characters");
+
+export const usernameSchema = z
+  .string()
+  .trim()
+  .min(3, "Username must be at least 3 characters")
+  .max(30, "Username must be at most 30 characters")
+  .regex(
+    /^[a-zA-Z0-9_]+$/,
+    "Username may only contain letters, numbers and underscores",
+  );

@@ -19,24 +19,76 @@ export function useAuth() {
   });
 
   const loginMutation = useMutation({
-    mutationFn: async (username: string) => {
-      const payload = api.auth.login.input.parse({ username });
+    mutationFn: async (credentials: { email: string; password: string }) => {
+      const payload = api.auth.login.input.parse(credentials);
       const res = await fetch(api.auth.login.path, {
         method: api.auth.login.method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Login failed");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Login failed" }));
+        throw new Error(err.message || "Login failed");
+      }
       return api.auth.login.responses[200].parse(await res.json());
     },
-    onSuccess: () => {
+    onSuccess: (user) => {
+      queryClient.setQueryData([api.auth.me.path], user);
       queryClient.invalidateQueries({ queryKey: [api.auth.me.path] });
       toast({ title: "Welcome back", description: "Successfully logged in." });
     },
-    onError: () => {
-      toast({ title: "Login failed", description: "Please try again.", variant: "destructive" });
+    onError: (err: Error) => {
+      toast({ title: "Login failed", description: err.message, variant: "destructive" });
     }
+  });
+
+  const registerMutation = useMutation({
+    mutationFn: async (data: { email: string; password: string; username: string }) => {
+      const payload = api.auth.register.input.parse(data);
+      const res = await fetch(api.auth.register.path, {
+        method: api.auth.register.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Registration failed" }));
+        throw new Error(err.message || "Registration failed");
+      }
+      return api.auth.register.responses[201].parse(await res.json());
+    },
+    onSuccess: (user) => {
+      queryClient.setQueryData([api.auth.me.path], user);
+      queryClient.invalidateQueries({ queryKey: [api.auth.me.path] });
+      toast({ title: "Welcome to the Circle", description: "Your account is ready." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Could not create account", description: err.message, variant: "destructive" });
+    }
+  });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: async (data: { currentPassword: string; newPassword: string }) => {
+      const payload = api.auth.changePassword.input.parse(data);
+      const res = await fetch(api.auth.changePassword.path, {
+        method: api.auth.changePassword.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Could not change password" }));
+        throw new Error(err.message || "Could not change password");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Password Updated", description: "Your password has been changed." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Could not change password", description: err.message, variant: "destructive" });
+    },
   });
 
   const logoutMutation = useMutation({
@@ -101,6 +153,10 @@ export function useAuth() {
     isLoading,
     login: loginMutation.mutateAsync,
     isLoggingIn: loginMutation.isPending,
+    register: registerMutation.mutateAsync,
+    isRegistering: registerMutation.isPending,
+    changePassword: changePasswordMutation.mutateAsync,
+    isChangingPassword: changePasswordMutation.isPending,
     logout: logoutMutation.mutateAsync,
     verifyStripeSession: verifyStripeSessionMutation.mutateAsync,
     isVerifyingSession: verifyStripeSessionMutation.isPending,

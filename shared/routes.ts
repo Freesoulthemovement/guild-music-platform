@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { insertProjectSchema, projects, files, investments, users, submissions, offerings, coproducers, royaltySplits, events, donations, cypherPasses, votes } from './schema';
-import { ROLES } from './schema';
+import { ROLES, emailSchema, passwordSchema, usernameSchema } from './schema';
 
 export const errorSchemas = {
   validation: z.object({ message: z.string(), field: z.string().optional() }),
@@ -18,12 +18,46 @@ export const api = {
         200: z.custom<typeof users.$inferSelect>().nullable(),
       },
     },
+    register: {
+      method: 'POST' as const,
+      path: '/api/auth/register' as const,
+      input: z.object({
+        email: emailSchema,
+        password: passwordSchema,
+        username: usernameSchema,
+      }),
+      responses: {
+        201: z.custom<typeof users.$inferSelect>(),
+        400: errorSchemas.validation,
+        409: z.object({ message: z.string() }),
+      }
+    },
     login: {
       method: 'POST' as const,
       path: '/api/auth/login' as const,
-      input: z.object({ username: z.string() }),
+      input: z.object({
+        email: emailSchema,
+        // Not passwordSchema: an existing password set under older rules must
+        // still be accepted at login. Length rules belong on registration.
+        password: z.string().min(1, "Password is required").max(200),
+      }),
       responses: {
         200: z.custom<typeof users.$inferSelect>(),
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
+      }
+    },
+    changePassword: {
+      method: 'POST' as const,
+      path: '/api/auth/change-password' as const,
+      input: z.object({
+        currentPassword: z.string().min(1).max(200),
+        newPassword: passwordSchema,
+      }),
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
       }
     },
     logout: {

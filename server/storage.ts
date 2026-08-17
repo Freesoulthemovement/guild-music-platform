@@ -3,8 +3,9 @@ import { eq, inArray, desc, and, sql, or, ne } from "drizzle-orm";
 import {
   users, projects, files, investments, submissions, offerings, coproducers, royaltySplits,
   events, donations, cypherPasses, votes, contributionNegotiations, licenseUnlocks,
-  follows, messages, playlists, playlistTracks,
+  follows, messages, playlists, playlistTracks, userCredentials,
   type User, type InsertUser,
+  type UserCredential,
   type Project, type InsertProject,
   type File, type InsertFile,
   type Investment, type InsertInvestment,
@@ -79,6 +80,13 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByStripeCustomerId(stripeCustomerId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  deleteUser(id: number): Promise<void>;
+
+  // Credentials — the only place the password hash is read or written
+  getCredentialByEmail(email: string): Promise<UserCredential | undefined>;
+  getCredentialByUserId(userId: number): Promise<UserCredential | undefined>;
+  createCredential(userId: number, email: string, passwordHash: string): Promise<UserCredential>;
+  updatePassword(userId: number, passwordHash: string): Promise<void>;
   updateUserSubscription(id: number, isSubscribed: boolean): Promise<User>;
   updateUserRoles(id: number, roles: string[]): Promise<User>;
   updateUserOnboarding(id: number, agreedAt: Date): Promise<User>;
@@ -190,6 +198,46 @@ export class DatabaseStorage implements IStorage {
   async createUser(insertUser: InsertUser): Promise<User> {
     const [user] = await db.insert(users).values(insertUser).returning();
     return user;
+  }
+
+  /** Only used to roll back a half-created account during registration. */
+  async deleteUser(id: number): Promise<void> {
+    await db.delete(users).where(eq(users.id, id));
+  }
+
+  // ── Credentials ─────────────────────────────────────────────────────────────
+  // Kept in their own table so the password hash and email are never part of a
+  // serialized User, which the API nests inside many other responses.
+
+  async getCredentialByEmail(email: string): Promise<UserCredential | undefined> {
+    const [cred] = await db
+      .select()
+      .from(userCredentials)
+      .where(eq(userCredentials.email, email.toLowerCase()));
+    return cred;
+  }
+
+  async getCredentialByUserId(userId: number): Promise<UserCredential | undefined> {
+    const [cred] = await db
+      .select()
+      .from(userCredentials)
+      .where(eq(userCredentials.userId, userId));
+    return cred;
+  }
+
+  async createCredential(userId: number, email: string, passwordHash: string): Promise<UserCredential> {
+    const [cred] = await db
+      .insert(userCredentials)
+      .values({ userId, email: email.toLowerCase(), passwordHash })
+      .returning();
+    return cred;
+  }
+
+  async updatePassword(userId: number, passwordHash: string): Promise<void> {
+    await db
+      .update(userCredentials)
+      .set({ passwordHash, updatedAt: new Date() })
+      .where(eq(userCredentials.userId, userId));
   }
 
   async updateUserSubscription(id: number, isSubscribed: boolean): Promise<User> {

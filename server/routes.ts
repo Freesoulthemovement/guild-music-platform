@@ -7,11 +7,44 @@ import { ROLES } from "@shared/schema";
 import { z } from "zod";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
+import rateLimit from "express-rate-limit";
 import { pool } from "./db";
 import { WebhookHandlers } from "./webhookHandlers";
 import { getStripeClient, getConfiguredPriceId } from "./stripeClient";
+import { hashPassword, verifyPassword, dummyVerify } from "./password";
 
 const PgSession = connectPgSimple(session);
+
+// Deliberately identical for "no such email" and "wrong password" so the
+// response cannot be used to enumerate which addresses have accounts.
+const INVALID_CREDENTIALS = "Invalid email or password";
+
+// Throttles credential guessing. Counts only failures, so a member logging in
+// repeatedly from a shared IP is not locked out by their own success.
+const authWriteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  skipSuccessfulRequests: true,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { message: "Too many attempts. Please try again in a few minutes." },
+});
+
+/**
+ * Starts an authenticated session, regenerating the session id first.
+ *
+ * Without regeneration an attacker who can plant a session cookie before login
+ * keeps a valid session afterwards (session fixation).
+ */
+function startSession(req: Express.Request & { session: any }, userId: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((err: unknown) => {
+      if (err) return reject(err);
+      req.session.userId = userId;
+      req.session.save((saveErr: unknown) => (saveErr ? reject(saveErr) : resolve()));
+    });
+  });
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -59,30 +92,125 @@ export async function registerRoutes(
     res.status(200).json(user || null);
   });
 
-  app.post(api.auth.login.path, async (req, res) => {
+  app.post(api.auth.register.path, authWriteLimiter, async (req, res) => {
     try {
-      const { username } = api.auth.login.input.parse(req.body);
-      let user = await storage.getUserByUsername(username);
-      if (!user) {
-        user = await storage.createUser({
-          username,
-          displayName: username,
-          credits: 0,
-          isSubscribed: false,
-          roles: [],
-        });
+      const { email, password, username } = api.auth.register.input.parse(
+        req.body,
+      );
+
+      if (await storage.getCredentialByEmail(email)) {
+        return res
+          .status(409)
+          .json({ message: "An account with that email already exists" });
       }
-      req.session.userId = user.id;
+      if (await storage.getUserByUsername(username)) {
+        return res.status(409).json({ message: "That username is taken" });
+      }
+
+      const passwordHash = await hashPassword(password);
+      const user = await storage.createUser({
+        username,
+        displayName: username,
+        credits: 0,
+        isSubscribed: false,
+        roles: [],
+      });
+
+      try {
+        await storage.createCredential(user.id, email, passwordHash);
+      } catch (err) {
+        // A unique-constraint race between the check above and this insert
+        // would otherwise leave an account nobody can log into.
+        await storage.deleteUser(user.id).catch(() => {});
+        return res
+          .status(409)
+          .json({ message: "An account with that email already exists" });
+      }
+
+      await startSession(req, user.id);
+      res.status(201).json(user);
+    } catch (err) {
+      if (err instanceof z.ZodError)
+        res.status(400).json({ message: err.errors[0].message });
+      else {
+        console.error("Registration error:", err);
+        res.status(500).json({ message: "Internal error" });
+      }
+    }
+  });
+
+  app.post(api.auth.login.path, authWriteLimiter, async (req, res) => {
+    try {
+      const { email, password } = api.auth.login.input.parse(req.body);
+
+      const credential = await storage.getCredentialByEmail(email);
+      if (!credential) {
+        // Spend comparable time so a missing account is not distinguishable
+        // from a wrong password by response timing.
+        await dummyVerify();
+        return res.status(401).json({ message: INVALID_CREDENTIALS });
+      }
+
+      const ok = await verifyPassword(password, credential.passwordHash);
+      if (!ok) {
+        return res.status(401).json({ message: INVALID_CREDENTIALS });
+      }
+
+      const user = await storage.getUser(credential.userId);
+      if (!user) {
+        console.error(`Credential ${credential.userId} has no matching user`);
+        return res.status(401).json({ message: INVALID_CREDENTIALS });
+      }
+
+      await startSession(req, user.id);
       res.status(200).json(user);
     } catch (err) {
       if (err instanceof z.ZodError)
         res.status(400).json({ message: err.errors[0].message });
-      else res.status(500).json({ message: "Internal error" });
+      else {
+        console.error("Login error:", err);
+        res.status(500).json({ message: "Internal error" });
+      }
+    }
+  });
+
+  app.post(api.auth.changePassword.path, authWriteLimiter, async (req, res) => {
+    if (!req.session?.userId)
+      return res.status(401).json({ message: "Not logged in" });
+    try {
+      const { currentPassword, newPassword } =
+        api.auth.changePassword.input.parse(req.body);
+
+      const credential = await storage.getCredentialByUserId(req.session.userId);
+      if (!credential) {
+        return res.status(400).json({ message: "This account has no password set" });
+      }
+      if (!(await verifyPassword(currentPassword, credential.passwordHash))) {
+        return res.status(401).json({ message: "Current password is incorrect" });
+      }
+
+      await storage.updatePassword(
+        req.session.userId,
+        await hashPassword(newPassword),
+      );
+      // Re-issue the session so a stolen pre-change cookie stops working.
+      await startSession(req, req.session.userId);
+      res.status(200).json({ success: true });
+    } catch (err) {
+      if (err instanceof z.ZodError)
+        res.status(400).json({ message: err.errors[0].message });
+      else {
+        console.error("Change password error:", err);
+        res.status(500).json({ message: "Internal error" });
+      }
     }
   });
 
   app.post(api.auth.logout.path, (req, res) => {
-    req.session.destroy(() => res.status(200).json({ success: true }));
+    req.session.destroy(() => {
+      res.clearCookie("connect.sid");
+      res.status(200).json({ success: true });
+    });
   });
 
   // NOTE: /api/auth/subscribe (mock free-subscribe) is intentionally removed.
@@ -1241,9 +1369,29 @@ export async function registerRoutes(
     res.json(tracks);
   });
 
-  seedDatabase().catch(console.error);
+  // Demo data only. These accounts are subscribed and two of them hold the
+  // ministry role, so seeding them into a live database would hand anyone who
+  // guessed the password an administrator account.
+  if (!isProduction) {
+    seedDatabase().catch(console.error);
+  }
 
   return httpServer;
+}
+
+/**
+ * Development-only demo data. Never runs in production — see the caller.
+ *
+ * Every seeded account gets the same well-known password so the app is usable
+ * locally straight after a db:push.
+ */
+const DEV_SEED_PASSWORD = "circle-dev-password";
+
+/** Gives a seeded user login credentials, if they do not already have them. */
+async function ensureDevCredential(userId: number, email: string) {
+  if (await storage.getCredentialByUserId(userId)) return;
+  if (await storage.getCredentialByEmail(email)) return;
+  await storage.createCredential(userId, email, await hashPassword(DEV_SEED_PASSWORD));
 }
 
 async function seedDatabase() {
@@ -1343,6 +1491,12 @@ async function seedDatabase() {
       "ministry",
     ]);
   }
+
+  // Login credentials for the demo accounts. Password: see DEV_SEED_PASSWORD.
+  await ensureDevCredential(user1.id, "alice@example.com");
+  await ensureDevCredential(user2.id, "bob@example.com");
+  await ensureDevCredential(zara.id, "zara@example.com");
+  await ensureDevCredential(malik.id, "malik@example.com");
 
   const existingProjects = await storage.getProjects();
 
