@@ -2,8 +2,12 @@
  * The Free Soul Living Dictionary — extracted entries.
  *
  * Source: "88 Essential Definitions for Sovereignty — How to Kill a Vempire —
- * the Free Soul Ecclesiastical Living Tribal Dictionary". A verbatim extract
- * carried over from the nigtalk application so both apps present the same text.
+ * the Free Soul Ecclesiastical Living Tribal Dictionary", volume 1.1.1.
+ *
+ * A verbatim extract carried over from the nigtalk application so both apps
+ * present the same text. Verified against vol 1.1.1 directly: all 132 entries
+ * whose pages the contents lists agree with DICTIONARY_PAGE_MAP below, and the
+ * entry numbering matches, so the deep links land on the right pages.
  *
  * Pinned here rather than fetched from Drive at runtime: this wording is quoted
  * in the membership agreement, so it must not change under a member after they
