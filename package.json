@@ -8,7 +8,11 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "grant-ministry": "tsx scripts/grant-ministry.ts",
+    "verify:signing": "tsx scripts/verify-r2-signing.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

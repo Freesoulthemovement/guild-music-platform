@@ -64,6 +64,28 @@ app.use((req, res, next) => {
   next();
 });
 
+/**
+ * Liveness. Deliberately does not touch the database.
+ *
+ * Hosts restart a service whose health check fails, so making this depend on
+ * Postgres would turn a brief database blip into a restart loop. Point the
+ * platform's health check here.
+ */
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({ status: "ok", uptime: Math.round(process.uptime()) });
+});
+
+/** Readiness. Checks the database, for use after a deploy or by monitoring. */
+app.get("/api/health/ready", async (_req, res) => {
+  try {
+    const { pool } = await import("./db");
+    await pool.query("SELECT 1");
+    res.status(200).json({ status: "ready", database: "up" });
+  } catch (err: any) {
+    res.status(503).json({ status: "not_ready", database: "down", error: err.message });
+  }
+});
+
 (async () => {
   // The webhook endpoint is registered manually in the Stripe dashboard and
   // verified per-request with STRIPE_WEBHOOK_SECRET, so there is nothing to
@@ -106,14 +128,45 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
+  httpServer.listen({ port, host: "0.0.0.0" }, () => {
+    log(`serving on port ${port}`);
+  });
+
+  /**
+   * Graceful shutdown.
+   *
+   * Platforms send SIGTERM and then SIGKILL a short time later. Without this
+   * the process dies mid-request on every deploy, so a member's upload or
+   * checkout can be cut off. Stop accepting connections, let in-flight work
+   * finish, then close the database pool.
+   */
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log(`${signal} received — draining connections`, "shutdown");
+
+    // Hard stop if a hung request would otherwise outlive the platform's grace
+    // period; better a clean exit than being SIGKILLed mid-write.
+    const force = setTimeout(() => {
+      log("drain timed out — exiting", "shutdown");
+      process.exit(1);
+    }, 25_000);
+    force.unref();
+
+    httpServer.close(async () => {
+      try {
+        const { pool } = await import("./db");
+        await pool.end();
+        log("database pool closed", "shutdown");
+      } catch (err: any) {
+        log(`error closing pool: ${err.message}`, "shutdown");
+      }
+      clearTimeout(force);
+      process.exit(0);
+    });
+  };
+
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
 })();
