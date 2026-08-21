@@ -195,6 +195,20 @@ export function OnboardingModal({ isOpen, isAlreadySubscribed = false, onAgreeme
                 {/* Living Dictionary acknowledgment */}
                 <div className="space-y-3">
                   <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Free Soul Living Dictionary</p>
+                  <p className="text-xs text-muted-foreground/70">
+                    The key terms are below. The full work — all 160 entries —
+                    lives in{" "}
+                    <a
+                      href="/library"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                      data-testid="link-full-dictionary"
+                    >
+                      the Dictionary
+                    </a>
+                    .
+                  </p>
                   <div
                     className="h-36 overflow-y-auto rounded-xl bg-amber-500/5 border border-amber-500/20 p-4 text-xs text-muted-foreground leading-relaxed whitespace-pre-line font-mono"
                     data-testid="living-dictionary-text"

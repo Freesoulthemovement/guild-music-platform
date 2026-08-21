@@ -23,6 +23,7 @@ import ProfilePage from "@/pages/profile";
 import FeedPage from "@/pages/feed";
 import MessagesPage from "@/pages/messages";
 import PlaylistsPage from "@/pages/playlists";
+import LibraryPage from "@/pages/library";
 import ResetPasswordPage from "@/pages/reset-password";
 import VerifyEmailPage from "@/pages/verify-email";
 
@@ -116,6 +117,7 @@ function Router() {
         {/* Public: reachable from an emailed link without being signed in */}
         <Route path="/reset-password" component={ResetPasswordPage} />
         <Route path="/verify-email" component={VerifyEmailPage} />
+        <Route path="/library" component={LibraryPage} />
         <Route path="/charter" component={Charter} />
         <Route component={NotFound} />
       </Switch>

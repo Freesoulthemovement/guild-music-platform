@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Disc3, UserCircle, LogOut, Zap, Star, ShieldCheck, Radio, MessageSquare, ListMusic } from "lucide-react";
+import { Disc3, UserCircle, LogOut, Zap, Star, ShieldCheck, Radio, MessageSquare, ListMusic, Book } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -85,6 +85,12 @@ export function NavBar() {
               <Button variant="ghost" size="sm" className="text-sm font-medium hover:bg-white/5 hidden sm:inline-flex" data-testid="nav-ministry">
                 <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
                 Ministry
+              </Button>
+            </Link>
+            <Link href="/library">
+              <Button variant="ghost" size="sm" className="text-sm font-medium hover:bg-white/5 hidden sm:inline-flex" data-testid="nav-library">
+                <Book className="w-4 h-4 mr-1.5" />
+                Dictionary
               </Button>
             </Link>
             <Link href="/charter">
