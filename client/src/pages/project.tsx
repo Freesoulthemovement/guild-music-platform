@@ -859,6 +859,7 @@ export default function ProjectDetail() {
 
   const getFileIcon = (type: string) => {
     if (type === 'stem') return <FileAudio className="w-5 h-5 text-primary" />;
+    if (type === 'video') return <Film className="w-5 h-5 text-fuchsia-400" />;
     if (type === 'artwork') return <FileImage className="w-5 h-5 text-accent" />;
     return <FileCode className="w-5 h-5 text-muted-foreground" />;
   };
@@ -988,7 +989,7 @@ export default function ProjectDetail() {
                           </label>
                           <input
                             type="file"
-                            accept="audio/*"
+                            accept="audio/*,video/*"
                             onChange={e => {
                               setSubAudio(e.target.files?.[0] ?? null);
                               setSubUploadError(null);
@@ -1005,7 +1006,7 @@ export default function ProjectDetail() {
                             </p>
                           )}
                           <p className="text-xs text-muted-foreground/60">
-                            Beats, stems and vocals play in the Circle player. Up to {formatBytes(MAX_UPLOAD_BYTES)}.
+                            Audio plays in the Circle player; video plays inline on the contribution. Up to {formatBytes(MAX_UPLOAD_BYTES)}.
                           </p>
                         </div>
 
@@ -1162,6 +1163,7 @@ export default function ProjectDetail() {
                           data-testid="select-file-type"
                         >
                           <option value="stem">Audio Stem</option>
+                          <option value="video">Video</option>
                           <option value="artwork">Artwork</option>
                           <option value="other">Other</option>
                         </select>
@@ -1257,18 +1259,31 @@ export default function ProjectDetail() {
                             };
                             const isCurrentTrack = currentTrack?.id === sub.id;
                             const isPlayingThis = isCurrentTrack && playerState.playing;
+                            // Video is shown in place; the mini-player is audio-only.
+                            const isVideo = (sub.contentType ?? "").startsWith("video/");
                             return (
                             <div key={sub.id} data-testid={`submission-card-${sub.id}`} className="p-4 rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
                               <div className="flex items-start justify-between gap-3 mb-2">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <button
-                                    onClick={() => isCurrentTrack ? togglePlay() : playTrack(track)}
-                                    className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${isCurrentTrack ? "bg-primary text-primary-foreground" : "bg-white/10 hover:bg-primary/80 hover:text-primary-foreground text-muted-foreground"}`}
-                                    data-testid={`button-play-submission-${sub.id}`}
-                                    title={isPlayingThis ? "Pause" : "Play"}
-                                  >
-                                    {isPlayingThis ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-                                  </button>
+                                  {isVideo ? (
+                                    <span
+                                      className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 bg-white/10 text-muted-foreground"
+                                      title="Video contribution"
+                                      data-testid={`video-badge-${sub.id}`}
+                                    >
+                                      <Film className="w-3 h-3" />
+                                    </span>
+                                  ) : (
+                                    <button
+                                      onClick={() => isCurrentTrack ? togglePlay() : playTrack(track)}
+                                      className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${isCurrentTrack ? "bg-primary text-primary-foreground" : "bg-white/10 hover:bg-primary/80 hover:text-primary-foreground text-muted-foreground"}`}
+                                      data-testid={`button-play-submission-${sub.id}`}
+                                      title={isPlayingThis ? "Pause" : "Play"}
+                                      disabled={!sub.fileUrl}
+                                    >
+                                      {isPlayingThis ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                                    </button>
+                                  )}
                                   <span className="font-semibold text-sm">{sub.title}</span>
                                   <span className="text-xs px-2 py-0.5 rounded bg-white/5 text-muted-foreground uppercase tracking-wider">
                                     {SUBMISSION_TYPE_LABELS[sub.type] ?? sub.type}
@@ -1296,8 +1311,17 @@ export default function ProjectDetail() {
                               {sub.description && (
                                 <p className="text-sm text-muted-foreground">{sub.description}</p>
                               )}
+                              {isVideo && sub.fileUrl && (
+                                <video
+                                  controls
+                                  preload="metadata"
+                                  src={sub.fileUrl}
+                                  className="mt-3 w-full max-h-[420px] rounded-xl border border-white/5 bg-black"
+                                  data-testid={`video-player-${sub.id}`}
+                                />
+                              )}
                               <div className="flex justify-end mt-2">
-                                <AddToPlaylistMenu submissionId={sub.id} />
+                                {!isVideo && <AddToPlaylistMenu submissionId={sub.id} />}
                               </div>
                             </div>
                             );

@@ -133,6 +133,23 @@ loop. `/api/health/ready` is the one that proves Postgres is reachable.
 
 Then register an account, upload a file to a project, and confirm playback.
 
+## Retiring the Replit deployment
+
+Stopping the Repl is **not** the same as stopping the Deployment — a Replit
+Deployment keeps serving after the editor is closed, and keeps billing. In the
+Repl, open the **Deployments** pane and Stop (or Delete) the deployment, then
+confirm the `.replit.app` URL no longer answers.
+
+Before switching off, move anything still pointing at it:
+
+- Any custom domain's DNS.
+- The Stripe webhook endpoint, if it was registered against the Replit URL.
+- Secrets stored in Replit — they are not in this repo by design, so copy any
+  you still need into the new host first.
+
+Do this **as soon as the new host is live**. The old deployment runs the
+pre-migration code, where login took a username and no password.
+
 ## Operational notes
 
 - **Sessions** live in Postgres (`user_sessions`), so restarts and deploys do

@@ -9,7 +9,8 @@ import { createHash, createHmac, randomUUID } from "crypto";
  *
  * Signing is implemented directly rather than through @aws-sdk/* to avoid
  * pulling roughly fifty transitive packages into the bundle. The output is
- * byte-compared against boto3's presigner in scripts/verify-r2-signing.ts.
+ * byte-compared against boto3's presigner; those signatures are pinned in
+ * server/__tests__/r2.test.ts.
  */
 
 const ALGORITHM = "AWS4-HMAC-SHA256";
@@ -153,7 +154,10 @@ export function presignDownload(
   const contentType = safeContentType(opts.contentType);
   const extra: Record<string, string> = { "response-content-type": contentType };
 
-  const inline = contentType.startsWith("audio/") || contentType.startsWith("image/");
+  const inline =
+    contentType.startsWith("audio/") ||
+    contentType.startsWith("video/") ||
+    contentType.startsWith("image/");
   const disposition = inline ? "inline" : "attachment";
   extra["response-content-disposition"] = opts.filename
     ? `${disposition}; filename="${opts.filename.replace(/["\\]/g, "")}"`
@@ -162,12 +166,28 @@ export function presignDownload(
   return presign("GET", key, opts.expiresInSeconds ?? 60 * 60, extra);
 }
 
-/** Only these render in the browser; everything else is downloaded as bytes. */
+/**
+ * Only these render in the browser; everything else downloads as bytes.
+ *
+ * Deliberately an allowlist of concrete media types rather than a prefix match:
+ * a wildcard on video/ or image/ would let through formats that some browsers
+ * treat as scriptable documents.
+ */
 const INLINE_SAFE = new Set([
+  // Audio
   "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/aiff",
   "audio/x-aiff", "audio/flac", "audio/ogg", "audio/mp4", "audio/aac", "audio/webm",
+  // Video — performance-video and acting-reel submissions depend on these.
+  // quicktime covers .mov, which is what most phones record.
+  "video/mp4", "video/webm", "video/ogg", "video/quicktime",
+  // Images
   "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif",
 ]);
+
+/** True for types the app renders in a <video> element rather than <audio>. */
+export function isVideoType(contentType?: string | null): boolean {
+  return !!contentType && safeContentType(contentType).startsWith("video/");
+}
 
 export function safeContentType(contentType?: string | null): string {
   if (!contentType) return "application/octet-stream";
