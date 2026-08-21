@@ -159,15 +159,44 @@ export const api = {
       },
     },
   },
+  uploads: {
+    presign: {
+      method: 'POST' as const,
+      path: '/api/uploads/presign' as const,
+      input: z.object({
+        filename: z.string().min(1).max(200),
+        contentType: z.string().min(1).max(150),
+        sizeBytes: z.number().int().positive().max(500 * 1024 * 1024),
+        folder: z.enum(["submissions", "files", "avatars"]),
+      }),
+      responses: {
+        200: z.object({
+          key: z.string(),
+          uploadUrl: z.string(),
+          expiresInSeconds: z.number(),
+        }),
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
+        403: z.object({ message: z.string() }),
+        503: z.object({ message: z.string() }),
+      },
+    },
+  },
   files: {
     create: {
       method: 'POST' as const,
       path: '/api/projects/:projectId/files' as const,
       input: z.object({
-        name: z.string(),
-        url: z.string(),
+        name: z.string().min(1).max(200),
+        // Either an uploaded object (storageKey) or an external link (url).
+        url: z.string().optional(),
+        storageKey: z.string().min(1).max(400).optional(),
+        contentType: z.string().max(150).optional(),
+        sizeBytes: z.number().int().positive().max(500 * 1024 * 1024).optional(),
         type: z.string(),
         visibility: z.enum(["private", "public"]).default("private"),
+      }).refine((v) => !!(v.url || v.storageKey), {
+        message: "Either an uploaded file or a URL is required",
       }),
       responses: {
         201: z.custom<typeof files.$inferSelect>(),
@@ -256,6 +285,9 @@ export const api = {
         title: z.string(),
         description: z.string().optional(),
         fileUrl: z.string().optional(),
+        storageKey: z.string().min(1).max(400).optional(),
+        contentType: z.string().max(150).optional(),
+        sizeBytes: z.number().int().positive().max(500 * 1024 * 1024).optional(),
         visibility: z.enum(["private", "public"]).default("private"),
         licenseBestowalAmount: z.coerce.number().min(0).optional(),
         sampleClearancePercent: z.coerce.number().min(0).max(30).optional(),

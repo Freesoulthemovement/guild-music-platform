@@ -13,6 +13,13 @@ import { WebhookHandlers } from "./webhookHandlers";
 import { getStripeClient, getConfiguredPriceId } from "./stripeClient";
 import { hashPassword, verifyPassword, dummyVerify } from "./password";
 import {
+  presignUpload,
+  presignDownload,
+  buildObjectKey,
+  isStorageConfigured,
+  safeContentType,
+} from "./r2";
+import {
   createToken,
   hashToken,
   expiresInMinutes,
@@ -42,6 +49,20 @@ const authWriteLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: false,
   message: { message: "Too many attempts. Please try again in a few minutes." },
+});
+
+// Presigned upload URLs expire fast — the browser uses one immediately.
+const UPLOAD_URL_TTL_SECONDS = 15 * 60;
+// Playback URLs are longer so a track can be scrubbed without re-signing.
+const DOWNLOAD_URL_TTL_SECONDS = 60 * 60;
+
+// Caps how many upload slots one member can mint, since each is a writable URL.
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 100,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { message: "Too many uploads. Please slow down." },
 });
 
 // Tighter, and counts successes too: each request sends an email, so this caps
@@ -462,9 +483,19 @@ export async function registerRoutes(
       const input = api.files.create.input.parse(req.body);
       const file = await storage.createFile({
         ...input,
+        // Uploaded objects are read through the authorizing redirect, never a
+        // direct bucket URL, so private files stay private.
+        url: input.storageKey ? "" : (input.url ?? ""),
+        contentType: input.contentType
+          ? safeContentType(input.contentType)
+          : undefined,
         projectId: Number(req.params.projectId),
         uploaderId: req.session.userId,
       });
+      if (input.storageKey) {
+        await storage.setFileUrl(file.id, `/api/files/${file.id}/content`);
+        file.url = `/api/files/${file.id}/content`;
+      }
       res.status(201).json(file);
     } catch (err) {
       if (err instanceof z.ZodError)
@@ -650,6 +681,9 @@ export async function registerRoutes(
 
       const submission = await storage.createSubmission({
         ...input,
+        contentType: input.contentType
+          ? safeContentType(input.contentType)
+          : undefined,
         licenseBestowalAmount:
           input.licenseBestowalAmount != null
             ? input.licenseBestowalAmount.toString()
@@ -661,6 +695,13 @@ export async function registerRoutes(
         projectId: Number(req.params.projectId),
         userId: req.session.userId,
       });
+      if (input.storageKey) {
+        await storage.setSubmissionFileUrl(
+          submission.id,
+          `/api/submissions/${submission.id}/content`,
+        );
+        submission.fileUrl = `/api/submissions/${submission.id}/content`;
+      }
       res.status(201).json(submission);
     } catch (err) {
       if (err instanceof z.ZodError)
@@ -982,6 +1023,111 @@ export async function registerRoutes(
       req.session.userId,
     );
     res.status(200).json({ unlocked });
+  });
+
+  // ── Uploads ───────────────────────────────────────────────────────────────
+  // The browser PUTs directly to R2 with this URL, so stem-sized files never
+  // pass through this process.
+  app.post(api.uploads.presign.path, uploadLimiter, async (req, res) => {
+    if (!req.session?.userId)
+      return res.status(401).json({ message: "Not logged in" });
+
+    const uploader = await storage.getUser(req.session.userId);
+    if (!uploader?.isSubscribed)
+      return res
+        .status(403)
+        .json({ message: "Active membership required to upload" });
+
+    if (!isStorageConfigured())
+      return res
+        .status(503)
+        .json({ message: "File storage is not configured on this server." });
+
+    try {
+      const input = api.uploads.presign.input.parse(req.body);
+      const key = buildObjectKey(req.session.userId, input.folder, input.filename);
+      res.status(200).json({
+        key,
+        uploadUrl: presignUpload(key, UPLOAD_URL_TTL_SECONDS),
+        expiresInSeconds: UPLOAD_URL_TTL_SECONDS,
+      });
+    } catch (err) {
+      if (err instanceof z.ZodError)
+        res.status(400).json({ message: err.errors[0].message });
+      else {
+        console.error("Presign error:", err);
+        res.status(500).json({ message: "Could not prepare the upload" });
+      }
+    }
+  });
+
+  /**
+   * Whether a viewer may read private content in a project.
+   *
+   * Mirrors the filtering already applied by GET /api/projects/:id — without
+   * this, a private stem would be reachable by anyone who knew its id.
+   */
+  async function canViewPrivate(userId: number | undefined, projectId: number) {
+    if (!userId) return false;
+    const viewer = await storage.getUser(userId);
+    if (viewer?.isSubscribed) return true;
+    const project = await storage.getProject(projectId);
+    return project?.creatorId === userId;
+  }
+
+  // Redirects to a short-lived signed URL rather than proxying the bytes.
+  app.get("/api/files/:id/content", async (req, res) => {
+    const file = await storage.getFile(Number(req.params.id));
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    if (
+      file.visibility !== "public" &&
+      !(await canViewPrivate(req.session?.userId, file.projectId))
+    ) {
+      return res.status(403).json({ message: "Members only" });
+    }
+
+    if (!file.storageKey) {
+      // Rows predating object storage still hold an external URL.
+      if (file.url) return res.redirect(302, file.url);
+      return res.status(404).json({ message: "No file attached" });
+    }
+
+    res.redirect(
+      302,
+      presignDownload(file.storageKey, {
+        contentType: file.contentType ?? undefined,
+        filename: file.name,
+        expiresInSeconds: DOWNLOAD_URL_TTL_SECONDS,
+      }),
+    );
+  });
+
+  app.get("/api/submissions/:id/content", async (req, res) => {
+    const submission = await storage.getSubmission(Number(req.params.id));
+    if (!submission)
+      return res.status(404).json({ message: "Submission not found" });
+
+    if (
+      submission.visibility !== "public" &&
+      !(await canViewPrivate(req.session?.userId, submission.projectId))
+    ) {
+      return res.status(403).json({ message: "Members only" });
+    }
+
+    if (!submission.storageKey) {
+      if (submission.fileUrl) return res.redirect(302, submission.fileUrl);
+      return res.status(404).json({ message: "No audio attached" });
+    }
+
+    res.redirect(
+      302,
+      presignDownload(submission.storageKey, {
+        contentType: submission.contentType ?? undefined,
+        filename: submission.title,
+        expiresInSeconds: DOWNLOAD_URL_TTL_SECONDS,
+      }),
+    );
   });
 
   // ── Stripe Webhook ────────────────────────────────────────────────────────

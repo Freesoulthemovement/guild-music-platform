@@ -111,6 +111,10 @@ export interface IStorage {
   createProject(project: InsertProject): Promise<Project>;
 
   createFile(file: InsertFile): Promise<File>;
+  getFile(id: number): Promise<File | undefined>;
+  setFileUrl(id: number, url: string): Promise<void>;
+  setSubmissionFileUrl(id: number, fileUrl: string): Promise<void>;
+  getSubmission(id: number): Promise<Submission | undefined>;
 
   createInvestment(investment: InsertInvestment): Promise<Investment>;
   getProjectInvestments(projectId: number): Promise<Investment[]>;
@@ -401,6 +405,26 @@ export class DatabaseStorage implements IStorage {
   async createFile(insertFile: InsertFile): Promise<File> {
     const [file] = await db.insert(files).values(insertFile).returning();
     return file;
+  }
+
+  /** Single-row lookups used by the authorized media redirects. */
+  async getFile(id: number): Promise<File | undefined> {
+    const [row] = await db.select().from(files).where(eq(files.id, id));
+    return row;
+  }
+
+  async getSubmission(id: number): Promise<Submission | undefined> {
+    const [row] = await db.select().from(submissions).where(eq(submissions.id, id));
+    return row;
+  }
+
+  /** Set after insert, since the playback route embeds the new row's id. */
+  async setFileUrl(id: number, url: string): Promise<void> {
+    await db.update(files).set({ url }).where(eq(files.id, id));
+  }
+
+  async setSubmissionFileUrl(id: number, fileUrl: string): Promise<void> {
+    await db.update(submissions).set({ fileUrl }).where(eq(submissions.id, id));
   }
 
   async createInvestment(insertInvestment: InsertInvestment): Promise<Investment> {

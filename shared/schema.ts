@@ -128,7 +128,13 @@ export const files = pgTable("files", {
   projectId: integer("project_id").notNull(),
   uploaderId: integer("uploader_id").notNull(),
   name: text("name").notNull(),
+  // Legacy/external location. New uploads set storageKey instead and this
+  // holds the playback route rather than a direct object URL.
   url: text("url").notNull(),
+  // R2 object key. Null for rows created before object storage existed.
+  storageKey: text("storage_key"),
+  contentType: text("content_type"),
+  sizeBytes: integer("size_bytes"),
   type: text("type").notNull(),
   visibility: text("visibility").notNull().default("private"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -151,6 +157,10 @@ export const submissions = pgTable("submissions", {
   title: text("title").notNull(),
   description: text("description"),
   fileUrl: text("file_url"),
+  // R2 object key for the attached audio, when there is one.
+  storageKey: text("storage_key"),
+  contentType: text("content_type"),
+  sizeBytes: integer("size_bytes"),
   visibility: text("visibility").notNull().default("private"),
   licenseBestowalAmount: numeric("license_bestowal_amount"),
   sampleClearancePercent: numeric("sample_clearance_percent"),

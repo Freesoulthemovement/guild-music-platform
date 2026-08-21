@@ -11,6 +11,7 @@ import { useProjectLaunchStatus, useUnlockLicense, useMyLicenseUnlock } from "@/
 import { useAuth } from "@/hooks/use-auth";
 import { usePlayer } from "@/context/player";
 import { AddToPlaylistMenu } from "@/components/add-to-playlist-menu";
+import { uploadFile, formatBytes, MAX_UPLOAD_BYTES } from "@/lib/upload";
 import { format } from "date-fns";
 import {
   FileAudio, FileImage, FileCode, UploadCloud, TrendingUp, AlertCircle,
@@ -727,6 +728,9 @@ export default function ProjectDetail() {
   const [fileName, setFileName] = useState("");
   const [fileType, setFileType] = useState("stem");
   const [fileVisibility, setFileVisibility] = useState<"private" | "public">("private");
+  const [pickedFile, setPickedFile] = useState<File | null>(null);
+  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const [isInvestOpen, setIsInvestOpen] = useState(false);
   const [investAmount, setInvestAmount] = useState("");
@@ -769,13 +773,36 @@ export default function ProjectDetail() {
     s => s.licenseBestowalAmount && Number(s.licenseBestowalAmount) > 0
   ) as (Submission & { user: User })[];
 
-  const handleFileUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const dummyUrl = `https://storage.producerscircle.mock/${Date.now()}_${fileName.replace(/\s+/g, '_')}`;
-    await createFile.mutateAsync({ name: fileName, type: fileType, url: dummyUrl, visibility: fileVisibility });
-    setIsFileOpen(false);
+  const resetFileForm = () => {
     setFileName("");
     setFileVisibility("private");
+    setPickedFile(null);
+    setUploadPercent(null);
+    setUploadError(null);
+  };
+
+  const handleFileUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pickedFile) return;
+    setUploadError(null);
+    setUploadPercent(0);
+    try {
+      // Straight to object storage; only the resulting key reaches our API.
+      const uploaded = await uploadFile(pickedFile, "files", setUploadPercent);
+      await createFile.mutateAsync({
+        name: fileName.trim() || uploaded.filename,
+        type: fileType,
+        storageKey: uploaded.storageKey,
+        contentType: uploaded.contentType,
+        sizeBytes: uploaded.sizeBytes,
+        visibility: fileVisibility,
+      });
+      setIsFileOpen(false);
+      resetFileForm();
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed");
+      setUploadPercent(null);
+    }
   };
 
   const handleInvest = async (e: React.FormEvent) => {
@@ -1017,8 +1044,37 @@ export default function ProjectDetail() {
                     </DialogHeader>
                     <form onSubmit={handleFileUpload} className="space-y-4 mt-4">
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">File Name</label>
-                        <Input required value={fileName} onChange={e => setFileName(e.target.value)} placeholder="e.g. Bass Synth Stem" className="bg-background/50 border-white/10" data-testid="input-file-name" />
+                        <label className="text-sm font-medium">Choose a file</label>
+                        <input
+                          type="file"
+                          required
+                          onChange={e => {
+                            const f = e.target.files?.[0] ?? null;
+                            setPickedFile(f);
+                            setUploadError(null);
+                            // Default the display name to the filename, minus extension.
+                            if (f && !fileName.trim()) {
+                              setFileName(f.name.replace(/\.[^.]+$/, ""));
+                            }
+                          }}
+                          className="w-full text-sm text-muted-foreground file:mr-3 file:py-2 file:px-4
+                                     file:rounded-lg file:border-0 file:text-sm file:font-medium
+                                     file:bg-primary/20 file:text-primary hover:file:bg-primary/30
+                                     file:cursor-pointer cursor-pointer"
+                          data-testid="input-file-picker"
+                        />
+                        {pickedFile && (
+                          <p className="text-xs text-muted-foreground" data-testid="picked-file-info">
+                            {pickedFile.name} — {formatBytes(pickedFile.size)}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground/60">
+                          Up to {formatBytes(MAX_UPLOAD_BYTES)}. Uploads go straight to storage.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Display Name</label>
+                        <Input value={fileName} onChange={e => setFileName(e.target.value)} placeholder="e.g. Bass Synth Stem" className="bg-background/50 border-white/10" data-testid="input-file-name" />
                       </div>
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Type</label>
@@ -1056,8 +1112,31 @@ export default function ProjectDetail() {
                         </button>
                       </div>
 
-                      <Button type="submit" className="w-full" disabled={createFile.isPending} data-testid="button-upload-submit">
-                        {createFile.isPending ? "Uploading..." : "Upload File"}
+                      {uploadPercent !== null && (
+                        <div className="space-y-1" data-testid="upload-progress">
+                          <div className="h-2 rounded-full bg-white/5 overflow-hidden border border-white/5">
+                            <div
+                              className="h-full bg-primary rounded-full transition-all"
+                              style={{ width: `${uploadPercent}%` }}
+                            />
+                          </div>
+                          <p className="text-xs text-muted-foreground text-right">{uploadPercent}%</p>
+                        </div>
+                      )}
+
+                      {uploadError && (
+                        <p className="text-xs text-rose-400" data-testid="upload-error">{uploadError}</p>
+                      )}
+
+                      <Button
+                        type="submit"
+                        className="w-full"
+                        disabled={!pickedFile || uploadPercent !== null || createFile.isPending}
+                        data-testid="button-upload-submit"
+                      >
+                        {uploadPercent !== null
+                          ? `Uploading ${uploadPercent}%`
+                          : createFile.isPending ? "Saving..." : "Upload File"}
                       </Button>
                     </form>
                   </DialogContent>
