@@ -58,7 +58,7 @@ interface OnboardingModalProps {
 
 const LIVING_DICTIONARY = `FREE SOUL LIVING DICTIONARY — Key Definitions
 
-"Private" — pertaining solely to PMA members; not open to the public, and held by membership, agreement and invitation
+"Private" — held by membership, agreement and invitation; a ministry that may serve its members privately or the public freely
 "Ecclesiastical" — of or relating to the sacred, private body of this faith community
 "Member" — a free individual who voluntarily enters this Private Membership Association
 "Bestowal" — a voluntary sacred gift freely given with no commercial expectation
