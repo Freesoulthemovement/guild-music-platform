@@ -45,19 +45,20 @@ export function NavBar() {
           </Link>
 
         <div className="flex items-center gap-4">
+          {/* Supporting is optional — the badge thanks supporters rather than
+              marking anyone else as lesser. */}
           {!user.isSubscribed && (
             <div className="hidden sm:flex items-center gap-2 text-sm text-muted-foreground px-3 py-1 rounded-full border border-white/10 bg-white/5">
-              <span>Basic Plan</span>
               <Link href="/account" className="text-primary hover:text-primary/80 transition-colors">
-                Upgrade
+                Support the Movement
               </Link>
             </div>
           )}
-          
+
           {user.isSubscribed && (
             <div className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-accent bg-accent/10 px-3 py-1.5 rounded-full border border-accent/20">
               <Zap className="w-3.5 h-3.5" />
-              Pro Member
+              Supporter
             </div>
           )}
 

@@ -21,7 +21,7 @@ export default function Charter() {
             <div>
               <h2 className="text-2xl font-display font-bold mb-4">Our Mission</h2>
               <p className="text-muted-foreground">
-                To foster a sanctuary for creative expression and spiritual sovereignty, 
+                To foster a sanctuary for creative expression and spiritual freedom, 
                 where artists and seekers unite under the banner of divine inspiration 
                 and collective stewardship.
               </p>

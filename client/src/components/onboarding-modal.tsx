@@ -10,9 +10,9 @@ const PMA_AGREEMENT = `PRIVATE MEMBERSHIP ASSOCIATION COMMUNITY AGREEMENT
 
 Free Soul Ecclesiastical Movement — Producers Circle
 
-By joining the Producers Circle, you agree to participate as a private member of the Free Soul Ecclesiastical Movement, a sovereign Private Membership Association (PMA). This membership is private and ecclesiastical in nature.
+By joining the Producers Circle, you agree to participate as a private member of the Free Soul Ecclesiastical Movement, a Private Membership Association (PMA). This membership is private and ecclesiastical in nature.
 
-1. SOVEREIGN PARTICIPATION
+1. PRIVATE PARTICIPATION
 You acknowledge that this community operates outside the jurisdiction of commercial regulation under the principles of ecclesiastical and private membership law. All creative works, investments, and royalty agreements are entered into voluntarily and privately between members.
 
 2. COMMUNITY STANDARDS
@@ -30,7 +30,7 @@ This Agreement invokes the full protections available under the law of Private M
 6. DISPUTE RESOLUTION
 Any disputes shall be resolved first through private mediation within the PMA community, consistent with our ecclesiastical principles.
 
-By continuing, you affirm your understanding and voluntary acceptance of these terms as a sovereign individual.`;
+By continuing, you affirm your understanding and voluntary acceptance of these terms as a private individual.`;
 
 const AI_PLEDGE_TEXT = `As a member of the Free Soul Ecclesiastical Movement Producers Circle, I solemnly pledge:
 
@@ -40,9 +40,9 @@ const AI_PLEDGE_TEXT = `As a member of the Free Soul Ecclesiastical Movement Pro
 
 • If I use AI tools as part of my creative process, I will disclose this in my submission notes so the community can make informed decisions about collaboration and co-production credits.
 
-• I acknowledge that I am a real, living human being and not an automated system, bot, or AI agent. My participation in this PMA is of my own free will as a sovereign individual.
+• I acknowledge that I am a real, living human being and not an automated system, bot, or AI agent. My participation in this PMA is of my own free will as a private individual.
 
-• I understand that authentic human creativity is the foundation of this sovereign circle, and that transparency builds the trust our community requires.
+• I understand that authentic human creativity is the foundation of this private circle, and that transparency builds the trust our community requires.
 
 • I commit to protecting the integrity of every member's contribution by honoring this pledge in all my creative submissions.
 
@@ -58,13 +58,12 @@ interface OnboardingModalProps {
 
 const LIVING_DICTIONARY = `FREE SOUL LIVING DICTIONARY — Key Definitions
 
-"Private" — pertaining solely to PMA members; existing outside the public commercial domain
-"Ecclesiastical" — of or relating to the sacred, sovereign body of this faith community
+"Private" — pertaining solely to PMA members; not open to the public, and held by membership, agreement and invitation
+"Ecclesiastical" — of or relating to the sacred, private body of this faith community
 "Member" — a free individual who voluntarily enters this Private Membership Association
-"Sovereign" — self-governing; not subject to commercial statutory jurisdiction
 "Bestowal" — a voluntary sacred gift freely given with no commercial expectation
-"PMA" — Private Membership Association; a private, faith-based sovereign community
-"Ministry Artist" — a sovereign creator designated by the movement to serve its sacred artistic expression`;
+"PMA" — Private Membership Association; a private, faith-based community
+"Ministry Artist" — a creator designated by the movement to serve its sacred artistic expression`;
 
 export function OnboardingModal({ isOpen, isAlreadySubscribed = false, onAgreementComplete }: OnboardingModalProps) {
   const [step, setStep] = useState<Step>(1);
@@ -73,29 +72,38 @@ export function OnboardingModal({ isOpen, isAlreadySubscribed = false, onAgreeme
   const [pledgeName, setPledgeName] = useState("");
   const [agreedToPledge, setAgreedToPledge] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSupporting, setIsSupporting] = useState(false);
   const { toast } = useToast();
 
   if (!isOpen) return null;
 
+  /** Optional. Only reached by a member who chooses to support. */
+  const handleSupport = async () => {
+    setIsSupporting(true);
+    try {
+      const res = await apiRequest("POST", "/api/stripe/checkout");
+      const data = await res.json();
+      if (data.url) window.location.href = data.url;
+      else throw new Error(data.message || "Could not open checkout");
+    } catch (err: any) {
+      let msg = "Something went wrong";
+      try {
+        if (err?.json) msg = (await err.json())?.message ?? msg;
+        else if (err?.message) msg = err.message;
+      } catch {}
+      toast({ title: "Checkout failed", description: msg, variant: "destructive" });
+      setIsSupporting(false);
+    }
+  };
+
+  /** Records the agreement and opens the Circle. No payment involved. */
   const handleActivate = async () => {
     setIsLoading(true);
     try {
-      if (isAlreadySubscribed) {
-        // User already has an active subscription — just record agreement completion
-        const res = await apiRequest("POST", "/api/stripe/onboarding/complete");
-        const data = await res.json();
-        if (data.success && onAgreementComplete) {
-          onAgreementComplete(data.user);
-        }
-      } else {
-        // New subscriber — redirect to Stripe Checkout
-        const res = await apiRequest("POST", "/api/stripe/checkout");
-        const data = await res.json();
-        if (data.url) {
-          window.location.href = data.url;
-        } else {
-          throw new Error(data.message || "Failed to create checkout session");
-        }
+      const res = await apiRequest("POST", "/api/auth/complete-onboarding");
+      const data = await res.json();
+      if (data.success && onAgreementComplete) {
+        onAgreementComplete(data.user);
       }
     } catch (err: any) {
       let msg = "Something went wrong";
@@ -180,7 +188,7 @@ export function OnboardingModal({ isOpen, isAlreadySubscribed = false, onAgreeme
                     {agreedToPma && <Check className="w-3 h-3 text-white" />}
                   </div>
                   <span className="text-sm leading-relaxed">
-                    I have read and voluntarily agree to the Free Soul PMA Community Agreement as a sovereign individual.
+                    I have read and voluntarily agree to the Free Soul PMA Community Agreement as a private individual.
                   </span>
                 </div>
 
@@ -202,7 +210,7 @@ export function OnboardingModal({ isOpen, isAlreadySubscribed = false, onAgreeme
                       {agreedToDefinitions && <Check className="w-3 h-3 text-white" />}
                     </div>
                     <span className="text-sm leading-relaxed">
-                      I acknowledge and accept the Living Dictionary definitions as the sovereign meaning of all terms used in this agreement.
+                      I acknowledge and accept the Living Dictionary definitions as the agreed meaning of all terms used in this agreement.
                     </span>
                   </div>
                 </div>
@@ -232,7 +240,7 @@ export function OnboardingModal({ isOpen, isAlreadySubscribed = false, onAgreeme
                   <h2 className="text-2xl font-display font-bold">AI Content Pledge</h2>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Authentic human creativity is the foundation of this sovereign circle. Please make your pledge.
+                  Authentic human creativity is the foundation of this private circle. Please make your pledge.
                 </p>
 
                 <div className="rounded-2xl bg-emerald-500/5 border border-emerald-500/20 p-5 text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
@@ -295,44 +303,57 @@ export function OnboardingModal({ isOpen, isAlreadySubscribed = false, onAgreeme
               >
                 <div className="flex items-center gap-3">
                   <Zap className="w-6 h-6 text-primary" />
-                  <h2 className="text-2xl font-display font-bold">Activate Membership</h2>
+                  <h2 className="text-2xl font-display font-bold">Enter the Circle</h2>
                 </div>
 
-                {isAlreadySubscribed ? (
-                  <div className="rounded-2xl bg-emerald-500/5 border border-emerald-500/20 p-6 flex items-start gap-3">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-semibold text-emerald-400 mb-1">Membership Already Active</p>
-                      <p className="text-sm text-muted-foreground">Your subscription is confirmed. Complete the agreement steps to gain full access to the Producers Circle. No additional charge will be made.</p>
-                    </div>
+                <div className="rounded-2xl bg-emerald-500/5 border border-emerald-500/20 p-6 flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="font-semibold text-emerald-400 mb-1">The Circle is open to you</p>
+                    <p className="text-sm text-muted-foreground">
+                      Creating projects, uploading stems, submitting contributions
+                      and taking part are free to every member. Nothing here is
+                      behind a payment.
+                    </p>
                   </div>
-                ) : (
-                <div className="rounded-2xl bg-primary/5 border border-primary/20 p-6">
-                  <div className="flex items-baseline gap-1 mb-4">
-                    <span className="text-4xl font-display font-bold">$8.88</span>
-                    <span className="text-muted-foreground">/month</span>
-                  </div>
-                  <ul className="space-y-3">
-                    {[
-                      "Submit beats, hooks, ideas & stems",
-                      "Invest in projects and earn credits",
-                      "Become a Co-Producer in the 3+4 model",
-                      "PMA protection on all contributions",
-                      "Early access to top tier collaborations",
-                    ].map((feat, i) => (
-                      <li key={i} className="flex items-center gap-3 text-sm text-muted-foreground">
-                        <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
-                        {feat}
-                      </li>
-                    ))}
-                  </ul>
                 </div>
+
+                {/* Optional, and deliberately secondary to entering. */}
+                {!isAlreadySubscribed && (
+                  <div className="rounded-2xl bg-primary/5 border border-primary/20 p-6 space-y-4" data-testid="optional-support">
+                    <div>
+                      <p className="font-semibold mb-1">Support the Movement</p>
+                      <p className="text-sm text-muted-foreground">
+                        Entirely optional. If you are able, a monthly bestowal
+                        sustains land, tools and gatherings — and keeps the Circle
+                        free for those who cannot give.
+                      </p>
+                    </div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-3xl font-display font-bold">$8.88</span>
+                      <span className="text-muted-foreground">/month</span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={handleSupport}
+                      disabled={isSupporting || isLoading}
+                      className="w-full border-primary/30 text-primary hover:bg-primary/10"
+                      data-testid="button-support-optional"
+                    >
+                      {isSupporting ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Opening checkout…</>
+                      ) : (
+                        "Give monthly"
+                      )}
+                    </Button>
+                    <p className="text-xs text-muted-foreground/60 text-center">
+                      You can also give any amount, once, from the Cypher page.
+                    </p>
+                  </div>
                 )}
 
                 <p className="text-xs text-muted-foreground/60 text-center">
-                  {isAlreadySubscribed
-                    ? "Your signed agreements will be recorded on your account."
-                    : "You'll be redirected to Stripe's secure checkout. Cancel anytime."}
+                  Your signed agreements will be recorded on your account.
                 </p>
 
                 <div className="flex gap-3">
@@ -354,11 +375,11 @@ export function OnboardingModal({ isOpen, isAlreadySubscribed = false, onAgreeme
                     {isLoading ? (
                       <>
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        {isAlreadySubscribed ? "Saving…" : "Redirecting…"}
+                        Entering…
                       </>
                     ) : (
                       <>
-                        {isAlreadySubscribed ? "Complete Agreement" : "Activate Membership"}
+                        Enter the Circle
                         <Zap className="w-4 h-4 ml-2" />
                       </>
                     )}

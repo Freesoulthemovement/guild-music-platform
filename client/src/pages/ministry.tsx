@@ -20,7 +20,7 @@ export default function MinistryPage() {
         </div>
         <h1 className="text-4xl sm:text-5xl font-display font-bold mb-3">Ministry</h1>
         <p className="text-muted-foreground max-w-xl leading-relaxed">
-          The sovereign artists of the Movement. Cypher Pass holders bestow votes to shape who performs at each gathering.
+          The ministry artists of the Movement. Cypher Pass holders bestow votes to shape who performs at each gathering.
         </p>
       </motion.div>
 

@@ -923,7 +923,6 @@ export default function ProjectDetail() {
               <div className="flex gap-2">
                 {/* Submit Contribution */}
                 {userRoles.length > 0 && (
-                  user?.isSubscribed ? (
                   <Dialog open={isSubmitOpen} onOpenChange={setIsSubmitOpen}>
                     <DialogTrigger asChild>
                       <Button variant="outline" size="sm" className="gap-2 border-white/10 hover:bg-white/5" data-testid="button-submit-contribution">
@@ -1101,15 +1100,9 @@ export default function ProjectDetail() {
                       </form>
                     </DialogContent>
                   </Dialog>
-                  ) : (
-                    <Button variant="outline" size="sm" className="gap-2 border-white/10 opacity-60 cursor-not-allowed" disabled data-testid="button-submit-contribution-locked" title="Active membership required">
-                      <Lock className="w-4 h-4" /> Members Only
-                    </Button>
-                  )
                 )}
 
                 {/* Upload File */}
-                {user?.isSubscribed ? (
                 <Dialog open={isFileOpen} onOpenChange={setIsFileOpen}>
                   <DialogTrigger asChild>
                     <Button variant="outline" size="sm" className="gap-2 border-white/10 hover:bg-white/5" data-testid="button-upload-file">
@@ -1220,11 +1213,6 @@ export default function ProjectDetail() {
                     </form>
                   </DialogContent>
                 </Dialog>
-                ) : (
-                  <Button variant="outline" size="sm" className="gap-2 border-white/10 opacity-60 cursor-not-allowed" disabled data-testid="button-upload-file-locked" title="Active membership required">
-                    <Lock className="w-4 h-4" /> File
-                  </Button>
-                )}
               </div>
             </div>
 
@@ -1460,13 +1448,6 @@ export default function ProjectDetail() {
             </div>
 
             {canInvest ? (
-              !user?.isSubscribed ? (
-                <Link href="/account">
-                  <Button className="w-full bg-white/10 text-muted-foreground border border-white/10 hover:bg-white/15" data-testid="button-invest-locked">
-                    <Lock className="w-4 h-4 mr-2" /> Members Only — Activate Membership
-                  </Button>
-                </Link>
-              ) : (
               <Dialog open={isInvestOpen} onOpenChange={setIsInvestOpen}>
                 <DialogTrigger asChild>
                   <Button className="w-full bg-white text-black hover:bg-white/90 shadow-[0_0_20px_rgba(255,255,255,0.1)]" data-testid="button-invest">
@@ -1496,7 +1477,6 @@ export default function ProjectDetail() {
                   </form>
                 </DialogContent>
               </Dialog>
-              )
             ) : (
               <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center text-sm text-muted-foreground">
                 Investment cap reached for this project.

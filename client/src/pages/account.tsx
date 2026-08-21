@@ -15,7 +15,7 @@ const SELF_ASSIGNABLE_ROLES: RoleKey[] = ["producer", "writer", "supporter", "co
 
 // Ministry Treasury allocation of the 5% platform bestowal
 const TREASURY_ALLOCATIONS = [
-  { label: "Land & Housing", percent: 50, color: "bg-emerald-500", icon: Home, description: "Acquiring and sustaining sovereign land" },
+  { label: "Land & Housing", percent: 50, color: "bg-emerald-500", icon: Home, description: "Acquiring and sustaining private land" },
   { label: "Equipment", percent: 25, color: "bg-primary", description: "Studio gear, tools & creative infrastructure", icon: Wrench },
   { label: "Savings", percent: 15, color: "bg-amber-500", description: "Movement reserve & long-term treasury", icon: PiggyBank },
   { label: "Celebration", percent: 10, color: "bg-rose-400", description: "Community gatherings & cultural events", icon: PartyPopper },
@@ -76,7 +76,7 @@ function MinistryTreasuryWidget({ isMinistry }: { isMinistry: boolean }) {
 
       <div className="mt-6 pt-4 border-t border-white/5">
         <p className="text-xs text-muted-foreground/60 italic leading-relaxed">
-          Of every project's 5% bestowal, these portions flow directly into the Free Soul Movement's sovereign treasury — sustaining land, tools, savings, and celebration for all members of the PMA.
+          Of every project's 5% bestowal, these portions flow directly into the Free Soul Movement's private treasury — sustaining land, tools, savings, and celebration for all members of the PMA.
         </p>
       </div>
     </div>
@@ -328,6 +328,7 @@ export default function AccountPage() {
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [rolesDirty, setRolesDirty] = useState(false);
   const [openingPortal, setOpeningPortal] = useState(false);
+  const [startingCheckout, setStartingCheckout] = useState(false);
 
   const { data: subStatus } = useQuery<{ status: string; cancelAtPeriodEnd?: boolean; currentPeriodEnd?: number }>({
     queryKey: ["/api/stripe/subscription-status"],
@@ -341,6 +342,22 @@ export default function AccountPage() {
   }, [user, rolesDirty]);
 
   if (!user) return null;
+
+  /** Starts a recurring bestowal. Optional — nothing in the app requires it. */
+  const startSupporting = async () => {
+    setStartingCheckout(true);
+    try {
+      const res = await apiRequest("POST", "/api/stripe/checkout");
+      const data = await res.json();
+      if (data.url) window.location.href = data.url;
+      else throw new Error(data.message || "Could not open checkout");
+    } catch (err: any) {
+      let msg = "Could not open checkout";
+      try { msg = (await err.json?.())?.message ?? msg; } catch {}
+      toast({ title: "Checkout error", description: msg, variant: "destructive" });
+      setStartingCheckout(false);
+    }
+  };
 
   const openBillingPortal = async () => {
     setOpeningPortal(true);
@@ -487,7 +504,7 @@ export default function AccountPage() {
                 <div className={`p-2 rounded-lg ${user.isSubscribed ? 'bg-primary text-white' : 'bg-white/10 text-white/50'}`}>
                   <Disc3 className="w-6 h-6" />
                 </div>
-                <h3 className="text-2xl font-display font-bold">Producers Circle Pro</h3>
+                <h3 className="text-2xl font-display font-bold">Support the Movement</h3>
               </div>
 
               {user.isSubscribed ? (
@@ -507,7 +524,7 @@ export default function AccountPage() {
                   ) : (
                     <div className="flex items-center gap-2" data-testid="status-subscription-active">
                       <ShieldCheck className="w-5 h-5 text-primary" />
-                      <span className="text-primary font-semibold">Active Membership</span>
+                      <span className="text-primary font-semibold">Supporting</span>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">$8.88/mo</span>
                       {subStatus?.cancelAtPeriodEnd && (
                         <span className="text-xs px-2 py-0.5 rounded-full bg-amber-400/10 text-amber-400 border border-amber-400/20" data-testid="status-cancel-at-period-end">
@@ -517,19 +534,31 @@ export default function AccountPage() {
                     </div>
                   )}
                   <p className="text-sm text-muted-foreground mt-2 max-w-md">
-                    Full access to pitch ideas, upload stems, submit contributions, and invest in shared creative works inside the Free Soul PMA.
+                    Thank you. Your monthly bestowal sustains the land, tools and
+                    gatherings of the Free Soul PMA. Every member may create,
+                    contribute and take part whether or not they give.
                   </p>
                 </>
               ) : (
                 <>
-                  <p className="text-2xl font-bold font-mono" data-testid="text-subscription-price">$8.88<span className="text-base text-muted-foreground font-sans font-normal">/month</span></p>
-                  <ul className="space-y-3 mt-6">
+                  <p className="text-sm text-muted-foreground max-w-md" data-testid="text-support-explainer">
+                    The Circle is open. Creating projects, uploading stems,
+                    submitting contributions and taking part are free to every
+                    member — nothing here is behind a payment.
+                  </p>
+                  <p className="text-2xl font-bold font-mono mt-4" data-testid="text-subscription-price">
+                    $8.88<span className="text-base text-muted-foreground font-sans font-normal">/month</span>
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-2 max-w-md">
+                    If you are able, a recurring bestowal sustains what the
+                    Movement carries for everyone:
+                  </p>
+                  <ul className="space-y-3 mt-4">
                     {[
-                      "Submit beats, hooks, ideas & stems",
-                      "Invest in projects and earn credits",
-                      "Become a Co-Producer in the 3+4 model",
-                      "PMA protection on all contributions",
-                      "Early access to top tier collaborations",
+                      "Land, housing and gathering space for the tribe",
+                      "Tools and studio resources shared across the Circle",
+                      "Bestowals to ministry artists",
+                      "Keeping the Circle free for those who cannot give",
                     ].map((feat, i) => (
                       <li key={i} className="flex items-center gap-3 text-sm text-muted-foreground">
                         <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" /> {feat}
@@ -555,13 +584,18 @@ export default function AccountPage() {
                 )}
               </Button>
             ) : (
-              <div
+              <Button
+                onClick={startSupporting}
+                disabled={startingCheckout}
                 data-testid="button-subscribe"
-                className="w-full md:w-auto px-8 py-4 rounded-xl bg-white/10 border border-white/20 text-sm text-muted-foreground flex items-center gap-2"
+                className="w-full md:w-auto px-8 py-4 h-auto rounded-xl font-semibold flex items-center gap-2"
               >
-                <Zap className="w-4 h-4 text-primary flex-shrink-0" />
-                Complete the membership agreement to activate
-              </div>
+                {startingCheckout ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Opening checkout…</>
+                ) : (
+                  <><Zap className="w-4 h-4 flex-shrink-0" /> Give monthly</>
+                )}
+              </Button>
             )}
           </div>
         </motion.div>

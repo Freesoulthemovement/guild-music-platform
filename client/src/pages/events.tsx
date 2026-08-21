@@ -518,22 +518,8 @@ export default function EventsPage() {
 
         {/* Right column — donation panel */}
         <div className="space-y-6 lg:sticky lg:top-24">
-          {user && !user.isSubscribed ? (
-            <div className="glass-panel rounded-3xl p-6 border border-white/10 flex flex-col items-center gap-4 text-center" data-testid="donation-panel-locked">
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <Lock className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <p className="font-display font-bold text-lg mb-1">Membership Required</p>
-                <p className="text-sm text-muted-foreground">Activate your Producers Circle Pro membership to log bestowals and earn Cypher Pass votes.</p>
-              </div>
-              <Link href="/account">
-                <Button className="w-full" data-testid="button-activate-from-events">Activate Membership</Button>
-              </Link>
-            </div>
-          ) : (
+          {/* Giving is open to every member, at any amount. */}
           <DonationPanel />
-          )}
 
           {/* Cypher Pass badge teaser */}
           {hasPass && (

@@ -84,30 +84,55 @@ suite("route authorization", () => {
     });
   });
 
-  describe("membership gates", () => {
-    it("refuses uploads and project creation without a membership", async () => {
+  describe("open participation", () => {
+    it("lets any member create, upload and submit without giving anything", async () => {
       const { client: c } = await helpers.register(base, "f@ex.com", "foxtrot");
+
+      const project = await c.post("/api/projects", { title: "Free", description: "D" });
+      expect(project.status).toBe(201);
+
+      await c.patch("/api/auth/me/roles", { roles: ["producer"] });
+      const submission = await c.post(`/api/projects/${project.body.id}/submissions`, {
+        type: "beat", title: "Open Beat", visibility: "private",
+      });
+      expect(submission.status).toBe(201);
+
+      const file = await c.post(`/api/projects/${project.body.id}/files`, {
+        name: "stem", type: "stem", url: "https://example.com/a.wav", visibility: "private",
+      });
+      expect(file.status).toBe(201);
+
+      const invest = await c.post(`/api/projects/${project.body.id}/investments`, {
+        amount: 10, percentage: 1,
+      });
+      expect(invest.status).toBe(201);
+
+      // Storage is not configured in tests, so 503 rather than 403 proves the
+      // membership gate is gone and only configuration is missing.
       const presign = await c.post("/api/uploads/presign", {
         filename: "a.wav", contentType: "audio/wav", sizeBytes: 10, folder: "files",
       });
-      expect(presign.status).toBe(403);
-
-      const project = await c.post("/api/projects", { title: "T", description: "D" });
-      expect(project.status).toBe(403);
+      expect(presign.status).toBe(503);
     });
 
-    it("allows them once subscribed", async () => {
-      const { client: c, user } = await helpers.register(base, "g@ex.com", "golf");
-      await helpers.makeSubscribed(user.id);
-      const project = await c.post("/api/projects", { title: "Golf EP", description: "D" });
-      expect(project.status).toBe(201);
+    it("completes onboarding without any payment", async () => {
+      const { client: c } = await helpers.register(base, "g@ex.com", "golf");
+      const res = await c.post("/api/auth/complete-onboarding");
+      expect(res.status).toBe(200);
+      expect(res.body.user.onboardingComplete).toBe(true);
+      expect(res.body.user.isSubscribed).toBe(false);
+    });
+
+    it("still requires a session", async () => {
+      const { client } = helpers;
+      expect((await client(base).post("/api/projects", { title: "x", description: "y" })).status).toBe(401);
+      expect((await client(base).post("/api/auth/complete-onboarding")).status).toBe(401);
     });
   });
 
   describe("private media", () => {
-    it("serves public files to anyone but private ones only to members", async () => {
+    it("serves public files to anyone but private ones only to signed-in members", async () => {
       const { client: owner, user } = await helpers.register(base, "h@ex.com", "hotel");
-      await helpers.makeSubscribed(user.id);
       const project = await owner.post("/api/projects", { title: "Hotel", description: "D" });
       const pid = project.body.id;
 
@@ -119,10 +144,11 @@ suite("route authorization", () => {
       });
       expect(priv.status).toBe(201);
 
+      // Another member who has never given anything can still read it.
       const { client: outsider } = await helpers.register(base, "i@ex.com", "india");
 
       expect((await owner.get(`/api/files/${priv.body.id}/content`)).status).toBe(302);
-      expect((await outsider.get(`/api/files/${priv.body.id}/content`)).status).toBe(403);
+      expect((await outsider.get(`/api/files/${priv.body.id}/content`)).status).toBe(302);
       expect((await owner.get(`/api/files/${priv.body.id}/content`, { anonymous: true })).status).toBe(403);
       expect((await owner.get(`/api/files/${pub.body.id}/content`, { anonymous: true })).status).toBe(302);
     });
@@ -131,7 +157,6 @@ suite("route authorization", () => {
   describe("data exposure", () => {
     it("does not leak a Stripe customer id to other members", async () => {
       const { client: owner, user } = await helpers.register(base, "j@ex.com", "juliet");
-      await helpers.makeSubscribed(user.id);
       const { pool } = await import("../db");
       await pool.query("UPDATE users SET stripe_customer_id = $1 WHERE id = $2", ["cus_CANARY_LEAK", user.id]);
       await owner.post("/api/projects", { title: "Juliet", description: "D" });
@@ -148,8 +173,7 @@ suite("route authorization", () => {
     });
 
     it("shows licence purchasers only to the contributor selling it", async () => {
-      const { client: seller, user } = await helpers.register(base, "l@ex.com", "lima");
-      await helpers.makeSubscribed(user.id);
+      const { client: seller } = await helpers.register(base, "l@ex.com", "lima");
       await seller.patch("/api/auth/me/roles", { roles: ["producer"] });
       const project = await seller.post("/api/projects", { title: "Lima", description: "D" });
       const sub = await seller.post(`/api/projects/${project.body.id}/submissions`, {
@@ -166,8 +190,7 @@ suite("route authorization", () => {
 
   describe("creator-only actions", () => {
     it("limits negotiation review to the project creator", async () => {
-      const { client: creator, user } = await helpers.register(base, "n@ex.com", "november");
-      await helpers.makeSubscribed(user.id);
+      const { client: creator } = await helpers.register(base, "n@ex.com", "november");
       const project = await creator.post("/api/projects", { title: "Nov", description: "D" });
       const pid = project.body.id;
 

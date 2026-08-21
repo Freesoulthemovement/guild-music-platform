@@ -266,20 +266,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {!user?.isSubscribed && (
-          <Link href="/account">
-            <button
-              data-testid="button-new-project-locked"
-              title="Active membership required"
-              className="px-6 py-3 rounded-xl font-semibold bg-white/5 text-muted-foreground border border-white/10 hover:border-white/20 transition-all duration-300 flex items-center gap-2 whitespace-nowrap"
-            >
-              <Lock className="w-5 h-5" />
-              Members Only
-            </button>
-          </Link>
-        )}
-        <Dialog open={isOpen && !!user?.isSubscribed} onOpenChange={v => user?.isSubscribed && setIsOpen(v)}>
-          {user?.isSubscribed && (
+        <Dialog open={isOpen} onOpenChange={setIsOpen}>
           <DialogTrigger asChild>
             <button
               data-testid="button-new-project"
@@ -289,7 +276,6 @@ export default function Dashboard() {
               New Project
             </button>
           </DialogTrigger>
-          )}
 
           <DialogContent className="glass-panel border-white/10 sm:max-w-[500px]">
             <DialogHeader>

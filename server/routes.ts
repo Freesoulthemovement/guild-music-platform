@@ -454,12 +454,14 @@ export async function registerRoutes(
     const project = await storage.getProject(Number(req.params.id));
     if (!project) return res.status(404).json({ message: "Project not found" });
     // Filter private content for non-subscribers
+    // "private" means members-only, not paying-members-only: signing in is
+    // enough. Anonymous visitors still see only what an author marked public.
     const viewer = req.session?.userId
       ? await storage.getUser(req.session.userId)
       : null;
-    const isSubscribed = !!viewer?.isSubscribed;
+    const isMember = !!viewer;
     const isCreator = viewer?.id === project.creatorId;
-    if (!isSubscribed && !isCreator) {
+    if (!isMember && !isCreator) {
       project.files = project.files.filter((f) => f.visibility === "public");
       project.submissions = project.submissions.filter(
         (s) => s.visibility === "public",
@@ -471,11 +473,6 @@ export async function registerRoutes(
   app.post(api.projects.create.path, async (req, res) => {
     if (!req.session?.userId)
       return res.status(401).json({ message: "Not logged in" });
-    const projectCreator = await storage.getUser(req.session.userId);
-    if (!projectCreator?.isSubscribed)
-      return res
-        .status(403)
-        .json({ message: "Active membership required to create projects" });
     try {
       const input = api.projects.create.input.parse(req.body);
       const project = await storage.createProject({
@@ -496,11 +493,6 @@ export async function registerRoutes(
   app.post(api.files.create.path, async (req, res) => {
     if (!req.session?.userId)
       return res.status(401).json({ message: "Not logged in" });
-    const fileUser = await storage.getUser(req.session.userId);
-    if (!fileUser?.isSubscribed)
-      return res
-        .status(403)
-        .json({ message: "Active membership required to upload files" });
     try {
       const input = api.files.create.input.parse(req.body);
       const file = await storage.createFile({
@@ -530,9 +522,6 @@ export async function registerRoutes(
   app.post(api.investments.create.path, async (req, res) => {
     if (!req.session?.userId)
       return res.status(401).json({ message: "Not logged in" });
-    const user = await storage.getUser(req.session.userId);
-    if (!user?.isSubscribed)
-      return res.status(403).json({ message: "Must be subscribed to invest" });
     try {
       const input = api.investments.create.input.parse(req.body);
       const projectId = Number(req.params.projectId);
@@ -631,12 +620,9 @@ export async function registerRoutes(
     const types = typesParam
       ? typesParam.split(",").filter(Boolean)
       : undefined;
-    const viewer = req.session?.userId
-      ? await storage.getUser(req.session.userId)
-      : null;
-    const isSubscribed = !!viewer?.isSubscribed;
+    const isMember = !!req.session?.userId;
     const subs = await storage.getAllSubmissions(types);
-    const visible = isSubscribed
+    const visible = isMember
       ? subs
       : subs.filter((s) => s.visibility === "public");
     res.status(200).json(visible);
@@ -648,15 +634,12 @@ export async function registerRoutes(
     const types = typesParam
       ? typesParam.split(",").filter(Boolean)
       : undefined;
-    const viewer = req.session?.userId
-      ? await storage.getUser(req.session.userId)
-      : null;
-    const isSubscribed = !!viewer?.isSubscribed;
+    const isMember = !!req.session?.userId;
     const subs = await storage.getProjectSubmissions(
       Number(req.params.projectId),
       types,
     );
-    const visible = isSubscribed
+    const visible = isMember
       ? subs
       : subs.filter((s) => s.visibility === "public");
     res.status(200).json(visible);
@@ -671,14 +654,6 @@ export async function registerRoutes(
       const { ALL_SUBMISSION_TYPES, SUBMISSION_TYPES } = await import(
         "@shared/schema"
       );
-      const submittingUser = await storage.getUser(req.session.userId);
-      if (!submittingUser?.isSubscribed) {
-        return res
-          .status(403)
-          .json({
-            message: "Active membership required to submit contributions",
-          });
-      }
       if (!(ALL_SUBMISSION_TYPES as readonly string[]).includes(input.type)) {
         return res
           .status(400)
@@ -810,12 +785,6 @@ export async function registerRoutes(
     try {
       const input = z.object({ artistUserId: z.number() }).parse(req.body);
       const eventId = Number(req.params.eventId);
-      // Active membership required to vote
-      const voter = await storage.getUser(req.session.userId);
-      if (!voter?.isSubscribed)
-        return res
-          .status(403)
-          .json({ message: "Active membership required to vote" });
       // Fetch event to validate it exists
       const event = await storage.getEvent(eventId);
       if (!event) return res.status(404).json({ message: "Event not found" });
@@ -1065,12 +1034,6 @@ export async function registerRoutes(
     if (!req.session?.userId)
       return res.status(401).json({ message: "Not logged in" });
 
-    const uploader = await storage.getUser(req.session.userId);
-    if (!uploader?.isSubscribed)
-      return res
-        .status(403)
-        .json({ message: "Active membership required to upload" });
-
     if (!isStorageConfigured())
       return res
         .status(503)
@@ -1101,11 +1064,9 @@ export async function registerRoutes(
    * this, a private stem would be reachable by anyone who knew its id.
    */
   async function canViewPrivate(userId: number | undefined, projectId: number) {
-    if (!userId) return false;
-    const viewer = await storage.getUser(userId);
-    if (viewer?.isSubscribed) return true;
-    const project = await storage.getProject(projectId);
-    return project?.creatorId === userId;
+    // Any signed-in member may read private project media; anonymous callers
+    // may not. Kept as a function so a stricter rule has one place to live.
+    return !!userId;
   }
 
   // Redirects to a short-lived signed URL rather than proxying the bytes.
@@ -1320,16 +1281,15 @@ export async function registerRoutes(
     }
   });
 
-  // ── Onboarding completion for already-subscribed users ────────────────────
-  // Called when a legacy subscribed user completes the agreement/pledge steps
-  // without needing to re-enter Stripe checkout.
-  app.post("/api/stripe/onboarding/complete", async (req, res) => {
+  // ── Community agreement ───────────────────────────────────────────────────
+  // Records that a member has read and accepted the PMA agreement. This is the
+  // only thing standing between a new member and the Circle — supporting the
+  // Movement financially is separate and optional.
+  app.post("/api/auth/complete-onboarding", async (req, res) => {
     if (!req.session?.userId)
       return res.status(401).json({ message: "Not logged in" });
     const user = await storage.getUser(req.session.userId);
     if (!user) return res.status(404).json({ message: "User not found" });
-    if (!user.isSubscribed)
-      return res.status(403).json({ message: "Active subscription required" });
     try {
       const updated = await storage.updateUserOnboarding(
         req.session.userId,
@@ -1449,8 +1409,8 @@ export async function registerRoutes(
       return res.status(401).json({ message: "Not logged in" });
     const user = await storage.getUserByUsername(req.params.username);
     if (!user) return res.status(404).json({ message: "User not found" });
-    const viewer = await storage.getUser(req.session.userId);
-    const isSubscribed = !!viewer?.isSubscribed;
+    // Reaching here already requires a session.
+    const isMember = true;
     const { submissions: subsTable } = await import("@shared/schema");
     const { db } = await import("./db");
     const { eq } = await import("drizzle-orm");
@@ -1458,7 +1418,7 @@ export async function registerRoutes(
       .select()
       .from(subsTable)
       .where(eq(subsTable.userId, user.id));
-    const visible = isSubscribed
+    const visible = isMember
       ? rows
       : rows.filter((s: any) => s.visibility === "public");
     res.status(200).json(visible);
@@ -1701,10 +1661,8 @@ export async function registerRoutes(
       return res.status(401).json({ message: "Not logged in" });
     const user = await storage.getUser(req.session.userId);
     if (!user) return res.status(401).json({ message: "Not logged in" });
-    const tracks = await storage.getRadioTracks(
-      req.session.userId,
-      user.isSubscribed ?? false,
-    );
+    // Signed in, so private tracks are in scope.
+    const tracks = await storage.getRadioTracks(req.session.userId, true);
     res.json(tracks);
   });
 
@@ -1740,7 +1698,7 @@ async function seedDatabase() {
     await storage.createEvent({
       title: "The First Cypher — Las Vegas",
       description:
-        "The inaugural annual gathering of the Free Soul Ecclesiastical Movement. Seven chosen co-producers perform live alongside ministry artists in a sovereign, members-only ceremony. Cypher Pass holders determine who takes the stage through their sacred 4-vote bestowal.",
+        "The inaugural annual gathering of the Free Soul Ecclesiastical Movement. Seven chosen co-producers perform live alongside ministry artists in a private, members-only ceremony. Cypher Pass holders determine who takes the stage through their sacred 4-vote bestowal.",
       location: "Las Vegas, NV",
       date: new Date("2027-03-20T20:00:00.000Z"),
       donationAllocation: JSON.stringify({
@@ -1819,7 +1777,7 @@ async function seedDatabase() {
   if (!malik) {
     malik = await storage.createUser({
       username: "malik",
-      displayName: "Malik Sovereign",
+      displayName: "Malik Freeman",
       credits: 0,
       isSubscribed: true,
       roles: ["ministry", "writer"],
