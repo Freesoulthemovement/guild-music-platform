@@ -1,4 +1,4 @@
-import { log } from "./index";
+import { log } from "./log";
 
 export type EmailMessage = {
   to: string;

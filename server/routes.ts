@@ -95,6 +95,28 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express,
 ): Promise<Server> {
+  /**
+   * Health probes are registered before the session middleware so a platform
+   * polling them never touches the session store.
+   *
+   * Liveness deliberately does not touch the database: hosts restart a service
+   * whose health check fails, so a database-dependent probe would turn a brief
+   * outage into a restart loop.
+   */
+  app.get("/api/health", (_req, res) => {
+    res.status(200).json({ status: "ok", uptime: Math.round(process.uptime()) });
+  });
+
+  /** Readiness does check the database — for post-deploy verification. */
+  app.get("/api/health/ready", async (_req, res) => {
+    try {
+      await pool.query("SELECT 1");
+      res.status(200).json({ status: "ready", database: "up" });
+    } catch (err: any) {
+      res.status(503).json({ status: "not_ready", database: "down", error: err.message });
+    }
+  });
+
   const isProduction = process.env.NODE_ENV === "production";
   const sessionSecret = process.env.SESSION_SECRET;
 

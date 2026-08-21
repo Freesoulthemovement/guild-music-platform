@@ -150,6 +150,22 @@ Before switching off, move anything still pointing at it:
 Do this **as soon as the new host is live**. The old deployment runs the
 pre-migration code, where login took a username and no password.
 
+## Running the tests
+
+```bash
+npm test
+```
+
+Unit tests run anywhere. The route-level suite additionally needs a database
+and is skipped without one — point it at a throwaway database, since it
+TRUNCATEs every table:
+
+```bash
+createdb guildtest
+DATABASE_URL='postgres://.../guildtest' npm run db:push
+TEST_DATABASE_URL='postgres://.../guildtest' npm test
+```
+
 ## Operational notes
 
 - **Sessions** live in Postgres (`user_sessions`), so restarts and deploys do

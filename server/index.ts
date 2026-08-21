@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
+import { log } from "./log";
 import { createServer } from "http";
 
 const app = express();
@@ -27,16 +28,7 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
 
-  console.log(`${formattedTime} [${source}] ${message}`);
-}
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -62,28 +54,6 @@ app.use((req, res, next) => {
   });
 
   next();
-});
-
-/**
- * Liveness. Deliberately does not touch the database.
- *
- * Hosts restart a service whose health check fails, so making this depend on
- * Postgres would turn a brief database blip into a restart loop. Point the
- * platform's health check here.
- */
-app.get("/api/health", (_req, res) => {
-  res.status(200).json({ status: "ok", uptime: Math.round(process.uptime()) });
-});
-
-/** Readiness. Checks the database, for use after a deploy or by monitoring. */
-app.get("/api/health/ready", async (_req, res) => {
-  try {
-    const { pool } = await import("./db");
-    await pool.query("SELECT 1");
-    res.status(200).json({ status: "ready", database: "up" });
-  } catch (err: any) {
-    res.status(503).json({ status: "not_ready", database: "down", error: err.message });
-  }
 });
 
 (async () => {
@@ -170,3 +140,5 @@ app.get("/api/health/ready", async (_req, res) => {
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
 })();
+
+export { log };
