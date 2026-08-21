@@ -743,6 +743,9 @@ export default function ProjectDetail() {
   const [subVisibility, setSubVisibility] = useState<"private" | "public">("private");
   const [subLicenseAmount, setSubLicenseAmount] = useState("");
   const [subClearancePercent, setSubClearancePercent] = useState("");
+  const [subAudio, setSubAudio] = useState<File | null>(null);
+  const [subUploadPercent, setSubUploadPercent] = useState<number | null>(null);
+  const [subUploadError, setSubUploadError] = useState<string | null>(null);
 
   if (isLoading) return (
     <div className="min-h-screen pt-24 px-8 flex items-center justify-center">
@@ -818,21 +821,40 @@ export default function ProjectDetail() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await createSubmission.mutateAsync({
-      type: subType,
-      title: subTitle,
-      description: subDesc,
-      visibility: subVisibility,
-      licenseBestowalAmount: showLicenseFields && subLicenseAmount ? parseFloat(subLicenseAmount) : undefined,
-      sampleClearancePercent: showLicenseFields && subClearancePercent ? parseFloat(subClearancePercent) : undefined,
-    });
-    setIsSubmitOpen(false);
-    setSubType("");
-    setSubTitle("");
-    setSubDesc("");
-    setSubVisibility("private");
-    setSubLicenseAmount("");
-    setSubClearancePercent("");
+    setSubUploadError(null);
+    try {
+      // Audio is optional — a mood board or concept has nothing to attach.
+      let attached: Awaited<ReturnType<typeof uploadFile>> | null = null;
+      if (subAudio) {
+        setSubUploadPercent(0);
+        attached = await uploadFile(subAudio, "submissions", setSubUploadPercent);
+      }
+
+      await createSubmission.mutateAsync({
+        type: subType,
+        title: subTitle,
+        description: subDesc,
+        visibility: subVisibility,
+        storageKey: attached?.storageKey,
+        contentType: attached?.contentType,
+        sizeBytes: attached?.sizeBytes,
+        licenseBestowalAmount: showLicenseFields && subLicenseAmount ? parseFloat(subLicenseAmount) : undefined,
+        sampleClearancePercent: showLicenseFields && subClearancePercent ? parseFloat(subClearancePercent) : undefined,
+      });
+
+      setIsSubmitOpen(false);
+      setSubType("");
+      setSubTitle("");
+      setSubDesc("");
+      setSubVisibility("private");
+      setSubLicenseAmount("");
+      setSubClearancePercent("");
+      setSubAudio(null);
+      setSubUploadPercent(null);
+    } catch (err) {
+      setSubUploadError(err instanceof Error ? err.message : "Submission failed");
+      setSubUploadPercent(null);
+    }
   };
 
   const getFileIcon = (type: string) => {
@@ -959,6 +981,34 @@ export default function ProjectDetail() {
                           />
                         </div>
 
+                        {/* Optional audio attachment */}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">
+                            Attach audio <span className="text-muted-foreground font-normal">(optional)</span>
+                          </label>
+                          <input
+                            type="file"
+                            accept="audio/*"
+                            onChange={e => {
+                              setSubAudio(e.target.files?.[0] ?? null);
+                              setSubUploadError(null);
+                            }}
+                            className="w-full text-sm text-muted-foreground file:mr-3 file:py-2 file:px-4
+                                       file:rounded-lg file:border-0 file:text-sm file:font-medium
+                                       file:bg-primary/20 file:text-primary hover:file:bg-primary/30
+                                       file:cursor-pointer cursor-pointer"
+                            data-testid="input-submission-audio"
+                          />
+                          {subAudio && (
+                            <p className="text-xs text-muted-foreground" data-testid="submission-audio-info">
+                              {subAudio.name} — {formatBytes(subAudio.size)}
+                            </p>
+                          )}
+                          <p className="text-xs text-muted-foreground/60">
+                            Beats, stems and vocals play in the Circle player. Up to {formatBytes(MAX_UPLOAD_BYTES)}.
+                          </p>
+                        </div>
+
                         {/* Visibility toggle */}
                         <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-white/[0.02]">
                           <div>
@@ -1017,8 +1067,35 @@ export default function ProjectDetail() {
                           </div>
                         )}
 
-                        <Button type="submit" className="w-full" disabled={createSubmission.isPending} data-testid="button-submit-form">
-                          {createSubmission.isPending ? "Submitting..." : "Submit Contribution"}
+                        {subUploadPercent !== null && (
+                          <div className="space-y-1" data-testid="submission-upload-progress">
+                            <div className="h-2 rounded-full bg-white/5 overflow-hidden border border-white/5">
+                              <div
+                                className="h-full bg-primary rounded-full transition-all"
+                                style={{ width: `${subUploadPercent}%` }}
+                              />
+                            </div>
+                            <p className="text-xs text-muted-foreground text-right">
+                              Uploading audio {subUploadPercent}%
+                            </p>
+                          </div>
+                        )}
+
+                        {subUploadError && (
+                          <p className="text-xs text-rose-400" data-testid="submission-upload-error">
+                            {subUploadError}
+                          </p>
+                        )}
+
+                        <Button
+                          type="submit"
+                          className="w-full"
+                          disabled={createSubmission.isPending || subUploadPercent !== null}
+                          data-testid="button-submit-form"
+                        >
+                          {subUploadPercent !== null
+                            ? `Uploading ${subUploadPercent}%`
+                            : createSubmission.isPending ? "Submitting..." : "Submit Contribution"}
                         </Button>
                       </form>
                     </DialogContent>

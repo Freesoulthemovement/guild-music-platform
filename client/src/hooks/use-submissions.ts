@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
 import { useToast } from "@/hooks/use-toast";
+import { z } from "zod";
 import type { Submission, User, Project } from "@shared/schema";
 
 type SubmissionWithUser = Submission & { user: User };
@@ -37,15 +38,8 @@ export function useCreateSubmission(projectId: number) {
   const { toast } = useToast();
 
   return useMutation({
-    mutationFn: async (data: {
-      type: string;
-      title: string;
-      description?: string;
-      fileUrl?: string;
-      visibility?: "private" | "public";
-      licenseBestowalAmount?: number;
-      sampleClearancePercent?: number;
-    }) => {
+    // Derived from the shared contract so the two cannot drift apart.
+    mutationFn: async (data: z.input<typeof api.submissions.create.input>) => {
       const res = await fetch(buildUrl(api.submissions.create.path, { projectId }), {
         method: "POST",
         headers: { "Content-Type": "application/json" },

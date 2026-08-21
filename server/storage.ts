@@ -99,13 +99,13 @@ export interface IStorage {
   updateUserStripeCustomerId(id: number, stripeCustomerId: string): Promise<User>;
   updateUserProfile(id: number, data: { displayName?: string; bio?: string; avatarUrl?: string }): Promise<User>;
 
-  getProjects(): Promise<(Project & { creator: User; investmentCount: number })[]>;
+  getProjects(): Promise<(Project & { creator: SafeUser; investmentCount: number })[]>;
   getProject(id: number): Promise<(Project & {
-    creator: User,
-    files: (File & { uploader: User })[],
-    investments: (Investment & { investor: User })[],
-    submissions: (Submission & { user: User })[],
-    coproducers: (Coproducer & { user: User })[],
+    creator: SafeUser,
+    files: (File & { uploader: SafeUser })[],
+    investments: (Investment & { investor: SafeUser })[],
+    submissions: (Submission & { user: SafeUser })[],
+    coproducers: (Coproducer & { user: SafeUser })[],
     royaltySplits: RoyaltySplit[],
   }) | undefined>;
   createProject(project: InsertProject): Promise<Project>;
@@ -119,15 +119,15 @@ export interface IStorage {
   createInvestment(investment: InsertInvestment): Promise<Investment>;
   getProjectInvestments(projectId: number): Promise<Investment[]>;
 
-  getProjectSubmissions(projectId: number, types?: string[]): Promise<(Submission & { user: User })[]>;
-  getAllSubmissions(types?: string[]): Promise<(Submission & { user: User; project: Project })[]>;
+  getProjectSubmissions(projectId: number, types?: string[]): Promise<(Submission & { user: SafeUser })[]>;
+  getAllSubmissions(types?: string[]): Promise<(Submission & { user: SafeUser; project: Project })[]>;
   createSubmission(submission: InsertSubmission): Promise<Submission>;
 
   createOffering(offering: InsertOffering): Promise<Offering>;
-  getProjectOfferings(projectId: number): Promise<(Offering & { user: User })[]>;
+  getProjectOfferings(projectId: number): Promise<(Offering & { user: SafeUser })[]>;
 
-  getCoproducers(projectId: number): Promise<(Coproducer & { user: User })[]>;
-  selectCoproducers(projectId: number): Promise<(Coproducer & { user: User })[]>;
+  getCoproducers(projectId: number): Promise<(Coproducer & { user: SafeUser })[]>;
+  selectCoproducers(projectId: number): Promise<(Coproducer & { user: SafeUser })[]>;
 
   getRoyaltySplits(projectId: number): Promise<RoyaltySplit[]>;
   initializeRoyaltySplits(projectId: number): Promise<void>;
@@ -150,12 +150,12 @@ export interface IStorage {
   getVoteLeaderboard(eventId: number): Promise<{ artistUserId: number; username: string; displayName: string | null; voteCount: number }[]>;
 
   // Ministry
-  getMinistryArtists(): Promise<User[]>;
+  getMinistryArtists(): Promise<SafeUser[]>;
   getMinistryStats(): Promise<{ passHolders: number; totalVotes: number }>;
 
   // Contribution Negotiations
   upsertNegotiation(data: { projectId: number; userId: number; requestedPercent: number; exchangeType: string }): Promise<ContributionNegotiation>;
-  getProjectNegotiations(projectId: number): Promise<(ContributionNegotiation & { user: User })[]>;
+  getProjectNegotiations(projectId: number): Promise<(ContributionNegotiation & { user: SafeUser })[]>;
   getUserNegotiation(projectId: number, userId: number): Promise<ContributionNegotiation | undefined>;
   updateNegotiationStatus(id: number, projectId: number, status: string): Promise<ContributionNegotiation | undefined>;
 
@@ -190,8 +190,8 @@ export interface IStorage {
   addTrackToPlaylist(playlistId: number, submissionId: number, userId: number): Promise<PlaylistTrack>;
   removeTrackFromPlaylist(playlistId: number, submissionId: number, userId: number): Promise<void>;
   reorderPlaylistTracks(playlistId: number, order: number[], userId: number): Promise<void>;
-  getPlaylistWithTracks(id: number, userId: number): Promise<(Playlist & { tracks: (PlaylistTrack & { submission: Submission & { user: User } })[] }) | undefined>;
-  getRadioTracks(userId: number, isSubscribed: boolean): Promise<(Submission & { user: User; project: Project })[]>;
+  getPlaylistWithTracks(id: number, userId: number): Promise<(Playlist & { tracks: (PlaylistTrack & { submission: Submission & { user: SafeUser } })[] }) | undefined>;
+  getRadioTracks(userId: number, isSubscribed: boolean): Promise<(Submission & { user: SafeUser; project: Project })[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -346,23 +346,23 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async getProjects(): Promise<(Project & { creator: User; investmentCount: number })[]> {
+  async getProjects(): Promise<(Project & { creator: SafeUser; investmentCount: number })[]> {
     const allProjects = await db.select().from(projects);
     const results = [];
     for (const project of allProjects) {
       const [creator] = await db.select().from(users).where(eq(users.id, project.creatorId));
       const projectInvestments = await db.select().from(investments).where(eq(investments.projectId, project.id));
-      results.push({ ...project, creator, investmentCount: projectInvestments.length });
+      results.push({ ...project, creator: toSafeUser(creator), investmentCount: projectInvestments.length });
     }
     return results;
   }
 
   async getProject(id: number): Promise<(Project & {
-    creator: User,
-    files: (File & { uploader: User })[],
-    investments: (Investment & { investor: User })[],
-    submissions: (Submission & { user: User })[],
-    coproducers: (Coproducer & { user: User })[],
+    creator: SafeUser,
+    files: (File & { uploader: SafeUser })[],
+    investments: (Investment & { investor: SafeUser })[],
+    submissions: (Submission & { user: SafeUser })[],
+    coproducers: (Coproducer & { user: SafeUser })[],
     royaltySplits: RoyaltySplit[],
   }) | undefined> {
     const [project] = await db.select().from(projects).where(eq(projects.id, id));
@@ -373,13 +373,13 @@ export class DatabaseStorage implements IStorage {
     const projectFiles = await db.select().from(files).where(eq(files.projectId, id));
     const filesWithUploaders = await Promise.all(projectFiles.map(async (f) => {
       const [uploader] = await db.select().from(users).where(eq(users.id, f.uploaderId));
-      return { ...f, uploader };
+      return { ...f, uploader: toSafeUser(uploader) };
     }));
 
     const projectInvestments = await db.select().from(investments).where(eq(investments.projectId, id));
     const investmentsWithInvestors = await Promise.all(projectInvestments.map(async (i) => {
       const [investor] = await db.select().from(users).where(eq(users.id, i.investorId));
-      return { ...i, investor };
+      return { ...i, investor: toSafeUser(investor) };
     }));
 
     const projectSubmissions = await this.getProjectSubmissions(id);
@@ -388,7 +388,7 @@ export class DatabaseStorage implements IStorage {
 
     return {
       ...project,
-      creator,
+      creator: toSafeUser(creator),
       files: filesWithUploaders,
       investments: investmentsWithInvestors,
       submissions: projectSubmissions,
@@ -436,7 +436,7 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(investments).where(eq(investments.projectId, projectId));
   }
 
-  async getProjectSubmissions(projectId: number, types?: string[]): Promise<(Submission & { user: User })[]> {
+  async getProjectSubmissions(projectId: number, types?: string[]): Promise<(Submission & { user: SafeUser })[]> {
     let rows: Submission[];
     if (types && types.length > 0) {
       rows = await db.select().from(submissions)
@@ -447,17 +447,17 @@ export class DatabaseStorage implements IStorage {
     }
     return await Promise.all(rows.map(async (s) => {
       const [user] = await db.select().from(users).where(eq(users.id, s.userId));
-      return { ...s, user };
+      return { ...s, user: toSafeUser(user) };
     }));
   }
 
-  async getAllSubmissions(types?: string[]): Promise<(Submission & { user: User; project: Project })[]> {
+  async getAllSubmissions(types?: string[]): Promise<(Submission & { user: SafeUser; project: Project })[]> {
     const rows = await db.select().from(submissions);
     const filtered = types && types.length > 0 ? rows.filter(s => types.includes(s.type)) : rows;
     return await Promise.all(filtered.map(async (s) => {
       const [user] = await db.select().from(users).where(eq(users.id, s.userId));
       const [project] = await db.select().from(projects).where(eq(projects.id, s.projectId));
-      return { ...s, user, project };
+      return { ...s, user: toSafeUser(user), project };
     }));
   }
 
@@ -471,23 +471,23 @@ export class DatabaseStorage implements IStorage {
     return offering;
   }
 
-  async getProjectOfferings(projectId: number): Promise<(Offering & { user: User })[]> {
+  async getProjectOfferings(projectId: number): Promise<(Offering & { user: SafeUser })[]> {
     const rows = await db.select().from(offerings).where(eq(offerings.projectId, projectId));
     return await Promise.all(rows.map(async (o) => {
       const [user] = await db.select().from(users).where(eq(users.id, o.userId));
-      return { ...o, user };
+      return { ...o, user: toSafeUser(user) };
     }));
   }
 
-  async getCoproducers(projectId: number): Promise<(Coproducer & { user: User })[]> {
+  async getCoproducers(projectId: number): Promise<(Coproducer & { user: SafeUser })[]> {
     const rows = await db.select().from(coproducers).where(eq(coproducers.projectId, projectId));
     return await Promise.all(rows.map(async (c) => {
       const [user] = await db.select().from(users).where(eq(users.id, c.userId));
-      return { ...c, user };
+      return { ...c, user: toSafeUser(user) };
     }));
   }
 
-  async selectCoproducers(projectId: number): Promise<(Coproducer & { user: User })[]> {
+  async selectCoproducers(projectId: number): Promise<(Coproducer & { user: SafeUser })[]> {
     await db.delete(coproducers).where(eq(coproducers.projectId, projectId));
 
     const projectOfferingsRows = await db.select().from(offerings).where(eq(offerings.projectId, projectId));
@@ -623,9 +623,12 @@ export class DatabaseStorage implements IStorage {
 
   // ── Ministry ────────────────────────────────────────────────────────────────
 
-  async getMinistryArtists(): Promise<User[]> {
+  async getMinistryArtists(): Promise<SafeUser[]> {
     const allUsers = await db.select().from(users);
-    return allUsers.filter(u => (u.roles ?? []).includes("ministry"));
+    // This list is served unauthenticated, so strip internal fields.
+    return allUsers
+      .filter(u => (u.roles ?? []).includes("ministry"))
+      .map(toSafeUser);
   }
 
   async getMinistryStats(): Promise<{ passHolders: number; totalVotes: number }> {
@@ -663,12 +666,12 @@ export class DatabaseStorage implements IStorage {
     return neg;
   }
 
-  async getProjectNegotiations(projectId: number): Promise<(ContributionNegotiation & { user: User })[]> {
+  async getProjectNegotiations(projectId: number): Promise<(ContributionNegotiation & { user: SafeUser })[]> {
     const rows = await db.select().from(contributionNegotiations)
       .where(eq(contributionNegotiations.projectId, projectId));
     return await Promise.all(rows.map(async (n) => {
       const [user] = await db.select().from(users).where(eq(users.id, n.userId));
-      return { ...n, user };
+      return { ...n, user: toSafeUser(user) };
     }));
   }
 
@@ -1021,7 +1024,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getPlaylistWithTracks(id: number, userId: number): Promise<(Playlist & { tracks: (PlaylistTrack & { submission: Submission & { user: User } })[] }) | undefined> {
+  async getPlaylistWithTracks(id: number, userId: number): Promise<(Playlist & { tracks: (PlaylistTrack & { submission: Submission & { user: SafeUser } })[] }) | undefined> {
     const [playlist] = await db.select().from(playlists).where(and(eq(playlists.id, id), eq(playlists.userId, userId)));
     if (!playlist) return undefined;
     const [requestingUser] = await db.select().from(users).where(eq(users.id, userId));
@@ -1033,19 +1036,19 @@ export class DatabaseStorage implements IStorage {
       // Access control: only return tracks the user can access
       if (sub.visibility !== "public" && !isSubscribed && sub.userId !== userId) return null;
       const [creator] = await db.select().from(users).where(eq(users.id, sub.userId));
-      return { ...t, submission: { ...sub, user: creator } };
+      return { ...t, submission: { ...sub, user: toSafeUser(creator) } };
     }));
     return { ...playlist, tracks: enriched.filter(Boolean) as any };
   }
 
-  async getRadioTracks(userId: number, isSubscribed: boolean): Promise<(Submission & { user: User; project: Project })[]> {
+  async getRadioTracks(userId: number, isSubscribed: boolean): Promise<(Submission & { user: SafeUser; project: Project })[]> {
     const allSubs = await db.select().from(submissions).orderBy(sql`RANDOM()`);
     const result = await Promise.all(allSubs.map(async sub => {
       if (!isSubscribed && sub.visibility !== "public" && sub.userId !== userId) return null;
       const [creator] = await db.select().from(users).where(eq(users.id, sub.userId));
       const [proj] = await db.select().from(projects).where(eq(projects.id, sub.projectId));
       if (!creator || !proj) return null;
-      return { ...sub, user: creator, project: proj };
+      return { ...sub, user: toSafeUser(creator), project: proj };
     }));
     return result.filter(Boolean) as any;
   }

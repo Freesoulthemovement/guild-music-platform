@@ -1009,8 +1009,19 @@ export async function registerRoutes(
     res.status(201).json(unlock);
   });
 
+  // Who licensed a beat, and for how much, is the seller's business only.
   app.get("/api/submissions/:id/unlocks", async (req, res) => {
+    if (!req.session?.userId)
+      return res.status(401).json({ message: "Not logged in" });
     const submissionId = Number(req.params.id);
+    const submission = await storage.getSubmission(submissionId);
+    if (!submission)
+      return res.status(404).json({ message: "Submission not found" });
+    if (submission.userId !== req.session.userId) {
+      return res
+        .status(403)
+        .json({ message: "Only the contributor can see who licensed this" });
+    }
     const unlocks = await storage.getLicenseUnlocks(submissionId);
     res.status(200).json(unlocks);
   });
