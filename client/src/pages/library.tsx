@@ -53,13 +53,13 @@ function EntryCard({ entry }: { entry: DictionaryEntry }) {
       <div className="space-y-4">
         <div>
           <p className="text-[11px] uppercase tracking-wider text-muted-foreground/50 mb-1 flex items-center gap-1.5">
-            <Scale className="w-3 h-3" /> As they define it
+            <Scale className="w-3 h-3" /> Official
           </p>
           <p className="text-sm text-muted-foreground leading-relaxed">{entry.official}</p>
         </div>
         <div className="pl-4 border-l-2 border-primary/40">
           <p className="text-[11px] uppercase tracking-wider text-primary/70 mb-1">
-            As we define it
+            True
           </p>
           <p className="text-sm leading-relaxed">{entry.true_def}</p>
         </div>
@@ -107,9 +107,11 @@ export default function LibraryPage() {
         </div>
 
         <p className="text-muted-foreground leading-relaxed mb-6 max-w-2xl">
-          Words are the manifestation of thought. These {DICTIONARY_ENTRIES.length} entries
-          set each term beside the definition institutions give it, so the difference is
-          plain. They are the meanings used throughout the Circle.
+          Words are the manifestation of thought. Each of these{" "}
+          {DICTIONARY_ENTRIES.length} entries states the official definition and
+          the true one, so both stand in the record and either may be examined.
+          Every statement is offered as lawful assertion, open to rebuttal
+          point-by-point. These are the meanings used throughout the Circle.
         </p>
 
         <Button
