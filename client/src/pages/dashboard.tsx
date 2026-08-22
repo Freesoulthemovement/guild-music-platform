@@ -26,7 +26,7 @@ const ROLE_CALLOUTS = [
 // For each role, what submission types appear in THEIR feed (what they consume/look for):
 // - Producer: sees own-type content (their peers' beats/loops) + collabs
 // - Writer: sees BEATS to write on (producer types) — opportunities to add vocals/lyrics
-// - Supporter: handled separately via ProjectsToBack component (projects with open investment)
+// - Supporter: handled separately via ProjectsToBack component (projects open for bestowals)
 // - Collaborator: sees themes/challenges open for response
 const ROLE_FEED_CONFIG: Record<string, { heading: string; description: string; icon: typeof Headphones; color: string; submissionTypes: string[] }> = {
   producer: {
@@ -109,27 +109,28 @@ function RoleFeedSection({ role, submissions }: { role: string; submissions: Sub
   );
 }
 
-type ProjectWithCreator = { id: number; title: string; description: string | null; creator: User; investmentCount: number };
+type ProjectWithCreator = { id: number; title: string; description: string | null; creator: User; bestowalCount: number };
 
 function SupporterProjectsSection({ projects }: { projects: ProjectWithCreator[] }) {
-  const openProjects = projects.filter(p => p.investmentCount < 3);
+  // Every project is open. There are no slots to run out of.
+  const openProjects = projects;
   return (
     <div className="space-y-3" data-testid="feed-section-supporter">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Heart className="w-5 h-5 text-rose-400" />
           <div>
-            <h3 className="font-display font-bold text-lg">Projects to Back</h3>
-            <p className="text-xs text-muted-foreground">Active projects with open investment slots — back them and earn credits</p>
+            <h3 className="font-display font-bold text-lg">Projects to Support</h3>
+            <p className="text-xs text-muted-foreground">Give what you can toward work the Circle is carrying</p>
           </div>
         </div>
         {openProjects.length > 0 && (
-          <span className="text-xs text-muted-foreground">{openProjects.length} open</span>
+          <span className="text-xs text-muted-foreground">{openProjects.length} active</span>
         )}
       </div>
       {openProjects.length === 0 ? (
         <div className="p-4 rounded-xl border border-dashed border-white/10 bg-white/[0.01] text-xs text-muted-foreground text-center">
-          All projects are fully backed — check back soon.
+          No projects yet — start one, or check back soon.
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -141,9 +142,11 @@ function SupporterProjectsSection({ projects }: { projects: ProjectWithCreator[]
               >
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <p className="font-semibold text-sm line-clamp-1">{p.title}</p>
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-rose-400/10 text-rose-400 border border-rose-400/20 flex-shrink-0">
-                    {3 - p.investmentCount} slots left
-                  </span>
+                  {p.bestowalCount > 0 && (
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-rose-400/10 text-rose-400 border border-rose-400/20 flex-shrink-0">
+                      {p.bestowalCount} {p.bestowalCount === 1 ? "bestowal" : "bestowals"}
+                    </span>
+                  )}
                 </div>
                 {p.description && (
                   <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{p.description}</p>

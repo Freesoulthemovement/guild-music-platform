@@ -518,44 +518,32 @@ export async function registerRoutes(
     }
   });
 
-  // Investments
-  app.post(api.investments.create.path, async (req, res) => {
+  // Bestowals — gifts toward a project. No percentage, no cap, no claim on
+  // anything the project produces. Article III Section 3 of the bylaws forbids
+  // profit distribution to individuals, and money exchanged for a share of
+  // others' work is an investment contract whatever it is called.
+  app.post(api.bestowals.create.path, async (req, res) => {
     if (!req.session?.userId)
       return res.status(401).json({ message: "Not logged in" });
     try {
-      const input = api.investments.create.input.parse(req.body);
-      const projectId = Number(req.params.projectId);
-      const existing = await storage.getProjectInvestments(projectId);
-      if (existing.length >= 3)
-        return res
-          .status(403)
-          .json({ message: "Maximum of 3 investors reached" });
-      if (input.percentage > 10)
-        return res.status(403).json({ message: "Maximum 10% per investor" });
-      if (existing.some((inv) => inv.investorId === req.session.userId)) {
-        return res
-          .status(403)
-          .json({ message: "You have already invested in this project" });
-      }
-      const investment = await storage.createInvestment({
-        projectId,
-        investorId: req.session.userId,
+      const input = api.bestowals.create.input.parse(req.body);
+      const bestowal = await storage.createBestowal({
+        projectId: Number(req.params.projectId),
+        memberId: req.session.userId,
         amount: input.amount.toString(),
-        percentage: input.percentage,
+        note: input.note,
       });
-      // Update persisted producer split to reflect new total equity
-      const allInvestments = await storage.getProjectInvestments(projectId);
-      const totalEquity = allInvestments.reduce(
-        (sum, i) => sum + i.percentage,
-        0,
-      );
-      await storage.upsertProducerSplit(projectId, totalEquity);
-      res.status(201).json(investment);
+      res.status(201).json(bestowal);
     } catch (err) {
       if (err instanceof z.ZodError)
         res.status(400).json({ message: err.errors[0].message });
       else res.status(500).json({ message: "Internal error" });
     }
+  });
+
+  app.get(api.bestowals.list.path, async (req, res) => {
+    const rows = await storage.getProjectBestowals(Number(req.params.projectId));
+    res.status(200).json(rows);
   });
 
   // Offerings
@@ -1822,13 +1810,12 @@ async function seedDatabase() {
       url: "https://storage.producerscircle.mock/synth.wav",
       type: "stem",
     });
-    const seedInvestment = await storage.createInvestment({
+    await storage.createBestowal({
       projectId: p1Id,
-      investorId: user2.id,
+      memberId: user2.id,
       amount: "50",
-      percentage: 5,
+      note: "For the mission",
     });
-    await storage.upsertProducerSplit(p1Id, seedInvestment.percentage);
   }
 
   if (!p2Id) {
@@ -1847,9 +1834,6 @@ async function seedDatabase() {
     const existingSplits = await storage.getRoyaltySplits(p.id);
     if (existingSplits.length === 0) {
       await storage.initializeRoyaltySplits(p.id);
-      const projInvestments = await storage.getProjectInvestments(p.id);
-      const total = projInvestments.reduce((sum, i) => sum + i.percentage, 0);
-      if (total > 0) await storage.upsertProducerSplit(p.id, total);
     }
   }
 

@@ -42,7 +42,7 @@ export async function resetDatabase() {
       auth_tokens, user_credentials, user_sessions,
       license_unlocks, playlist_tracks, playlists,
       contribution_negotiations, coproducers, royalty_splits,
-      offerings, investments, submissions, files,
+      offerings, bestowals, submissions, files,
       votes, cypher_passes, donations, events,
       messages, follows, projects, users
     RESTART IDENTITY CASCADE

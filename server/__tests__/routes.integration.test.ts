@@ -102,10 +102,12 @@ suite("route authorization", () => {
       });
       expect(file.status).toBe(201);
 
-      const invest = await c.post(`/api/projects/${project.body.id}/investments`, {
-        amount: 10, percentage: 1,
+      const bestowal = await c.post(`/api/projects/${project.body.id}/bestowals`, {
+        amount: 10, note: "For the work",
       });
-      expect(invest.status).toBe(201);
+      expect(bestowal.status).toBe(201);
+      // A gift, not a stake: nothing resembling a share comes back.
+      expect(bestowal.body).not.toHaveProperty("percentage");
 
       // Storage is not configured in tests, so 503 rather than 403 proves the
       // membership gate is gone and only configuration is missing.
@@ -113,6 +115,27 @@ suite("route authorization", () => {
         filename: "a.wav", contentType: "audio/wav", sizeBytes: 10, folder: "files",
       });
       expect(presign.status).toBe(503);
+    });
+
+    it("accepts a bestowal of any size and grants no share in return", async () => {
+      const { client: creator } = await helpers.register(base, "r@ex.com", "romeo");
+      const project = await creator.post("/api/projects", { title: "Romeo", description: "D" });
+      const pid = project.body.id;
+
+      const { client: giver } = await helpers.register(base, "s@ex.com", "sierra");
+      const small = await giver.post(`/api/projects/${pid}/bestowals`, { amount: 1 });
+      const large = await giver.post(`/api/projects/${pid}/bestowals`, { amount: 5000 });
+      expect(small.status).toBe(201);
+      // No investor cap, because there is nothing being sold.
+      expect(large.status).toBe(201);
+
+      // The project's royalty splits must not shift because money arrived.
+      const detail = await creator.get(`/api/projects/${pid}`);
+      const producers = detail.body.royaltySplits.find((r: any) => r.role === "producers");
+      expect(Number(producers.percentage)).toBe(0);
+      for (const b of detail.body.bestowals) {
+        expect(b).not.toHaveProperty("percentage");
+      }
     });
 
     it("completes onboarding without any payment", async () => {

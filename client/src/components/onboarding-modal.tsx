@@ -13,12 +13,12 @@ Free Soul Ecclesiastical Movement — Producers Circle
 By joining the Producers Circle, you agree to participate as a private member of the Free Soul Ecclesiastical Movement, a Private Membership Association (PMA). This membership is private and ecclesiastical in nature.
 
 1. PRIVATE PARTICIPATION
-You acknowledge that this community operates outside the jurisdiction of commercial regulation under the principles of ecclesiastical and private membership law. All creative works, investments, and royalty agreements are entered into voluntarily and privately between members.
+You acknowledge that this community operates outside the jurisdiction of commercial regulation under the principles of ecclesiastical and private membership law. All creative works, bestowals, and credit agreements are entered into voluntarily and privately between members.
 
 2. COMMUNITY STANDARDS
 Members agree to treat all creative contributions with respect and integrity. Unauthorized reproduction, distribution, or commercial exploitation of another member's work outside this PMA is strictly prohibited.
 
-3. ROYALTY & INVESTMENT FRAMEWORK
+3. BESTOWAL & CREDIT FRAMEWORK
 You understand the 3+4 co-producer model, treasury allocation (50% Land & Housing / 25% Equipment / 15% Savings / 10% Celebration), and the cypher pass system. All royalty splits are final when executed on-platform.
 
 4. CONFIDENTIALITY

@@ -140,12 +140,22 @@ export const files = pgTable("files", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const investments = pgTable("investments", {
+/**
+ * A gift toward a project. Deliberately carries no percentage.
+ *
+ * This replaces the former `investments` table, which recorded an equity
+ * percentage that flowed into the project's royalty splits. Money paid in
+ * exchange for a share of what others produce is an investment contract
+ * however it is labelled, and Article III Section 3 of the bylaws forbids
+ * profit distribution to individuals. A bestowal confers no claim on
+ * proceeds — only the record that it was given.
+ */
+export const bestowals = pgTable("bestowals", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id").notNull(),
-  investorId: integer("investor_id").notNull(),
+  memberId: integer("member_id").notNull(),
   amount: numeric("amount").notNull(),
-  percentage: integer("percentage").notNull(),
+  note: text("note"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -232,7 +242,7 @@ export const messages = pgTable("messages", {
 export const projectsRelations = relations(projects, ({ one, many }) => ({
   creator: one(users, { fields: [projects.creatorId], references: [users.id] }),
   files: many(files),
-  investments: many(investments),
+  bestowals: many(bestowals),
   submissions: many(submissions),
   offerings: many(offerings),
   coproducers: many(coproducers),
@@ -245,9 +255,9 @@ export const filesRelations = relations(files, ({ one }) => ({
   uploader: one(users, { fields: [files.uploaderId], references: [users.id] }),
 }));
 
-export const investmentsRelations = relations(investments, ({ one }) => ({
-  project: one(projects, { fields: [investments.projectId], references: [projects.id] }),
-  investor: one(users, { fields: [investments.investorId], references: [users.id] }),
+export const bestowalsRelations = relations(bestowals, ({ one }) => ({
+  project: one(projects, { fields: [bestowals.projectId], references: [projects.id] }),
+  member: one(users, { fields: [bestowals.memberId], references: [users.id] }),
 }));
 
 export const submissionsRelations = relations(submissions, ({ one, many }) => ({
@@ -381,7 +391,7 @@ export const votesRelations = relations(votes, ({ one }) => ({
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertProjectSchema = createInsertSchema(projects).omit({ id: true, createdAt: true });
 export const insertFileSchema = createInsertSchema(files).omit({ id: true, createdAt: true });
-export const insertInvestmentSchema = createInsertSchema(investments).omit({ id: true, createdAt: true });
+export const insertBestowalSchema = createInsertSchema(bestowals).omit({ id: true, createdAt: true });
 export const insertSubmissionSchema = createInsertSchema(submissions).omit({ id: true, createdAt: true });
 export const insertOfferingSchema = createInsertSchema(offerings).omit({ id: true, createdAt: true });
 export const insertCoproducerSchema = createInsertSchema(coproducers).omit({ id: true, createdAt: true });
@@ -401,8 +411,8 @@ export type Project = typeof projects.$inferSelect;
 export type InsertProject = z.infer<typeof insertProjectSchema>;
 export type File = typeof files.$inferSelect;
 export type InsertFile = z.infer<typeof insertFileSchema>;
-export type Investment = typeof investments.$inferSelect;
-export type InsertInvestment = z.infer<typeof insertInvestmentSchema>;
+export type Bestowal = typeof bestowals.$inferSelect;
+export type InsertBestowal = z.infer<typeof insertBestowalSchema>;
 export type Submission = typeof submissions.$inferSelect;
 export type InsertSubmission = z.infer<typeof insertSubmissionSchema>;
 export type Offering = typeof offerings.$inferSelect;

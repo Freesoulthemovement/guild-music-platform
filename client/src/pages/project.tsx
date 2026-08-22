@@ -2,7 +2,7 @@ import { useParams } from "wouter";
 import { useState } from "react";
 import { useProject } from "@/hooks/use-projects";
 import { useCreateFile } from "@/hooks/use-files";
-import { useCreateInvestment } from "@/hooks/use-investments";
+import { useCreateBestowal } from "@/hooks/use-bestowals";
 import { useCreateSubmission } from "@/hooks/use-submissions";
 import { useCreateOffering, useProjectOfferings } from "@/hooks/use-offerings";
 import { useCoproducers, useSelectCoproducers } from "@/hooks/use-coproducers";
@@ -55,7 +55,7 @@ const LAUNCH_CATEGORY_LABELS: Record<string, string> = {
 
 const SPLIT_META: Record<string, { label: string; color: string; icon: typeof Mic2; description: string }> = {
   artist:        { label: "Artist / Vocalist",   color: "bg-violet-500",  icon: Mic2,   description: "Master recording share (negotiable)" },
-  producers:     { label: "Producer(s)",          color: "bg-primary",     icon: Music2, description: "Investment equity % assigned per backer" },
+  producers:     { label: "Producer(s)",          color: "bg-primary",     icon: Music2, description: "Set by the creator for production work performed" },
   "co-producers":{ label: "Co-Producers (3+4)",  color: "bg-amber-500",   icon: Star,   description: "3% Master each × 7 blessed creators" },
   ministry:      { label: "Ministry Bestowal",    color: "bg-emerald-500", icon: Crown,  description: "Platform bestowal (Master) + optional 5% publishing admin" },
 };
@@ -720,7 +720,7 @@ export default function ProjectDetail() {
   const { user } = useAuth();
 
   const createFile = useCreateFile(projectId);
-  const createInvestment = useCreateInvestment(projectId);
+  const createBestowal = useCreateBestowal(projectId);
   const createSubmission = useCreateSubmission(projectId);
   const { playTrack, togglePlay, state: playerState, currentTrack } = usePlayer();
 
@@ -732,9 +732,9 @@ export default function ProjectDetail() {
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const [isInvestOpen, setIsInvestOpen] = useState(false);
-  const [investAmount, setInvestAmount] = useState("");
-  const [investPercent, setInvestPercent] = useState("");
+  const [isBestowOpen, setIsBestowOpen] = useState(false);
+  const [bestowAmount, setBestowAmount] = useState("");
+  const [bestowNote, setBestowNote] = useState("");
 
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
   const [subType, setSubType] = useState("");
@@ -758,10 +758,9 @@ export default function ProjectDetail() {
     </div>
   );
 
-  const totalPercentage = project.investments.reduce((sum, inv) => sum + inv.percentage, 0);
-  const availablePercentage = 100 - totalPercentage;
-  const investorCount = project.investments.length;
-  const canInvest = investorCount < 3 && availablePercentage > 0;
+  // Bestowals are gifts. There is no equity to claim and no cap to reach.
+  const projectBestowals = project.bestowals ?? [];
+  const totalBestowed = projectBestowals.reduce((sum, b) => sum + Number(b.amount), 0);
 
   const userRoles = user?.roles ?? [];
   const allowedSubmissionTypes = getSubmissionTypesForRoles(userRoles);
@@ -808,15 +807,15 @@ export default function ProjectDetail() {
     }
   };
 
-  const handleInvest = async (e: React.FormEvent) => {
+  const handleBestow = async (e: React.FormEvent) => {
     e.preventDefault();
-    await createInvestment.mutateAsync({
-      amount: parseFloat(investAmount),
-      percentage: parseInt(investPercent, 10),
+    await createBestowal.mutateAsync({
+      amount: parseFloat(bestowAmount),
+      note: bestowNote.trim() || undefined,
     });
-    setIsInvestOpen(false);
-    setInvestAmount("");
-    setInvestPercent("");
+    setIsBestowOpen(false);
+    setBestowAmount("");
+    setBestowNote("");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1416,86 +1415,94 @@ export default function ProjectDetail() {
 
         {/* Right sidebar */}
         <div className="space-y-6">
-          {/* Investments Panel */}
+          {/* Bestowals — gifts toward the work, conferring no share of it */}
           <div className="glass-panel rounded-3xl p-6 border-primary/20 bg-gradient-to-b from-card/60 to-primary/5">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-display font-bold">Investments</h3>
+              <h3 className="text-xl font-display font-bold">Bestowals</h3>
               <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
-                <TrendingUp className="w-4 h-4 text-primary" />
+                <Heart className="w-4 h-4 text-primary" />
               </div>
             </div>
 
-            <div className="space-y-4 mb-8">
+            <div className="space-y-4 mb-6">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Total Invested</span>
-                <span className="font-mono font-medium">${project.investments.reduce((sum, i) => sum + Number(i.amount), 0)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Equity Claimed</span>
-                <span className="font-mono font-medium">{totalPercentage}%</span>
+                <span className="text-muted-foreground">Total bestowed</span>
+                <span className="font-mono font-medium text-primary">${totalBestowed}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Investors</span>
-                <span className="font-mono font-medium">{investorCount} / 3</span>
+                <span className="text-muted-foreground">Members carrying this</span>
+                <span className="font-mono font-medium">{projectBestowals.length}</span>
               </div>
-
-              <div className="w-full bg-background rounded-full h-2 mt-2 overflow-hidden border border-white/5">
-                <div
-                  className="bg-gradient-to-r from-primary to-accent h-full rounded-full"
-                  style={{ width: `${totalPercentage}%` }}
-                />
-              </div>
+              <p className="text-xs text-muted-foreground/60 leading-relaxed pt-1">
+                A bestowal is a gift. It buys no share of this work and returns
+                no profit — it sustains the Circle so the work can be made.
+              </p>
             </div>
 
-            {canInvest ? (
-              <Dialog open={isInvestOpen} onOpenChange={setIsInvestOpen}>
-                <DialogTrigger asChild>
-                  <Button className="w-full bg-white text-black hover:bg-white/90 shadow-[0_0_20px_rgba(255,255,255,0.1)]" data-testid="button-invest">
-                    Invest in Project
+            <Dialog open={isBestowOpen} onOpenChange={setIsBestowOpen}>
+              <DialogTrigger asChild>
+                <Button className="w-full bg-white text-black hover:bg-white/90 shadow-[0_0_20px_rgba(255,255,255,0.1)]" data-testid="button-bestow">
+                  Make a Bestowal
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="glass-panel border-primary/20 sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Make a Bestowal</DialogTitle>
+                  <DialogDescription>
+                    Given freely toward this work, with no expectation of return.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleBestow} className="space-y-4 mt-4">
+                  <div className="bg-primary/10 border border-primary/20 p-3 rounded-lg flex gap-3 text-sm mb-2">
+                    <AlertCircle className="w-5 h-5 text-primary shrink-0" />
+                    <p className="text-primary-foreground/80">
+                      Bestowals confer no equity, royalty or claim on proceeds.
+                      Nothing is distributed back to individuals.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Amount ($)</label>
+                    <Input
+                      type="number" required min="1" step="0.01"
+                      value={bestowAmount}
+                      onChange={e => setBestowAmount(e.target.value)}
+                      placeholder="e.g. 25"
+                      className="bg-background/50 border-white/10 font-mono"
+                      data-testid="input-bestow-amount"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      Note <span className="text-muted-foreground font-normal">(optional)</span>
+                    </label>
+                    <Input
+                      value={bestowNote}
+                      onChange={e => setBestowNote(e.target.value)}
+                      placeholder="A word for the makers"
+                      maxLength={280}
+                      className="bg-background/50 border-white/10"
+                      data-testid="input-bestow-note"
+                    />
+                  </div>
+                  <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-white" disabled={createBestowal.isPending} data-testid="button-confirm-bestow">
+                    {createBestowal.isPending ? "Sending..." : "Bestow"}
                   </Button>
-                </DialogTrigger>
-                <DialogContent className="glass-panel border-primary/20 sm:max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Make an Investment</DialogTitle>
-                  </DialogHeader>
-                  <form onSubmit={handleInvest} className="space-y-4 mt-4">
-                    <div className="bg-primary/10 border border-primary/20 p-3 rounded-lg flex gap-3 text-sm mb-4">
-                      <AlertCircle className="w-5 h-5 text-primary shrink-0" />
-                      <p className="text-primary-foreground/80">Up to 10% equity per investor. Only {Math.min(10, availablePercentage)}% currently available.</p>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Investment Amount ($)</label>
-                      <Input type="number" required min="1" step="0.01" value={investAmount} onChange={e => setInvestAmount(e.target.value)} placeholder="e.g. 100" className="bg-background/50 border-white/10 font-mono" data-testid="input-invest-amount" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Requested Equity (%)</label>
-                      <Input type="number" required min="1" max={Math.min(10, availablePercentage)} value={investPercent} onChange={e => setInvestPercent(e.target.value)} placeholder={`Max ${Math.min(10, availablePercentage)}%`} className="bg-background/50 border-white/10 font-mono" data-testid="input-invest-percent" />
-                    </div>
-                    <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-white" disabled={createInvestment.isPending} data-testid="button-confirm-invest">
-                      {createInvestment.isPending ? "Processing..." : "Confirm Investment"}
-                    </Button>
-                  </form>
-                </DialogContent>
-              </Dialog>
-            ) : (
-              <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center text-sm text-muted-foreground">
-                Investment cap reached for this project.
-              </div>
-            )}
+                </form>
+              </DialogContent>
+            </Dialog>
 
-            {/* Investors list */}
-            {project.investments.length > 0 && (
+            {projectBestowals.length > 0 && (
               <div className="mt-6 pt-4 border-t border-white/5 space-y-2">
-                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3">Backers</p>
-                {project.investments.map(inv => (
-                  <div key={inv.id} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">
-                        {inv.investor?.username?.[0]?.toUpperCase()}
+                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3">Carried by</p>
+                {projectBestowals.map(b => (
+                  <div key={b.id} className="flex items-center justify-between text-sm" data-testid={`bestowal-${b.id}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0">
+                        {b.member?.username?.[0]?.toUpperCase()}
                       </div>
-                      <span className="text-muted-foreground">{inv.investor?.username}</span>
+                      <span className="text-muted-foreground truncate">{b.member?.username}</span>
                     </div>
-                    <span className="font-mono text-primary font-medium">{inv.percentage}%</span>
+                    <span className="font-mono text-primary font-medium flex-shrink-0">${Number(b.amount)}</span>
                   </div>
                 ))}
               </div>

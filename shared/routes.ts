@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertProjectSchema, projects, files, investments, users, submissions, offerings, coproducers, royaltySplits, events, donations, cypherPasses, votes } from './schema';
+import { insertProjectSchema, projects, files, bestowals, users, submissions, offerings, coproducers, royaltySplits, events, donations, cypherPasses, votes } from './schema';
 import { ROLES, emailSchema, passwordSchema, usernameSchema } from './schema';
 
 export const errorSchemas = {
@@ -130,7 +130,7 @@ export const api = {
       method: 'GET' as const,
       path: '/api/projects' as const,
       responses: {
-        200: z.array(z.custom<typeof projects.$inferSelect & { creator: typeof users.$inferSelect; investmentCount: number }>()),
+        200: z.array(z.custom<typeof projects.$inferSelect & { creator: typeof users.$inferSelect; bestowalCount: number }>()),
       },
     },
     get: {
@@ -140,7 +140,7 @@ export const api = {
         200: z.custom<typeof projects.$inferSelect & {
           creator: typeof users.$inferSelect,
           files: (typeof files.$inferSelect & { uploader: typeof users.$inferSelect })[],
-          investments: (typeof investments.$inferSelect & { investor: typeof users.$inferSelect })[],
+          bestowals: (typeof bestowals.$inferSelect & { member: typeof users.$inferSelect })[],
           submissions: (typeof submissions.$inferSelect & { user: typeof users.$inferSelect })[],
           coproducers: (typeof coproducers.$inferSelect & { user: typeof users.$inferSelect })[],
           royaltySplits: typeof royaltySplits.$inferSelect[],
@@ -205,19 +205,26 @@ export const api = {
       },
     },
   },
-  investments: {
+  bestowals: {
     create: {
       method: 'POST' as const,
-      path: '/api/projects/:projectId/investments' as const,
+      path: '/api/projects/:projectId/bestowals' as const,
+      // Amount only. A bestowal buys no share of anything.
       input: z.object({
-        amount: z.coerce.number(),
-        percentage: z.coerce.number().min(1).max(10),
+        amount: z.coerce.number().min(1),
+        note: z.string().max(280).optional(),
       }),
       responses: {
-        201: z.custom<typeof investments.$inferSelect>(),
+        201: z.custom<typeof bestowals.$inferSelect>(),
         400: errorSchemas.validation,
         401: errorSchemas.unauthorized,
-        403: z.object({ message: z.string() }),
+      },
+    },
+    list: {
+      method: 'GET' as const,
+      path: '/api/projects/:projectId/bestowals' as const,
+      responses: {
+        200: z.array(z.custom<typeof bestowals.$inferSelect & { member: typeof users.$inferSelect }>()),
       },
     },
   },

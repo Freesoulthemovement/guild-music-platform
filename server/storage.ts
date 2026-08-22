@@ -1,14 +1,14 @@
 import { db } from "./db";
 import { eq, inArray, desc, and, sql, or, ne } from "drizzle-orm";
 import {
-  users, projects, files, investments, submissions, offerings, coproducers, royaltySplits,
+  users, projects, files, bestowals, submissions, offerings, coproducers, royaltySplits,
   events, donations, cypherPasses, votes, contributionNegotiations, licenseUnlocks,
   follows, messages, playlists, playlistTracks, userCredentials, authTokens,
   type User, type InsertUser,
   type UserCredential, type AuthTokenPurpose,
   type Project, type InsertProject,
   type File, type InsertFile,
-  type Investment, type InsertInvestment,
+  type Bestowal, type InsertBestowal,
   type Submission, type InsertSubmission,
   type Offering, type InsertOffering,
   type Coproducer, type InsertCoproducer,
@@ -99,11 +99,11 @@ export interface IStorage {
   updateUserStripeCustomerId(id: number, stripeCustomerId: string): Promise<User>;
   updateUserProfile(id: number, data: { displayName?: string; bio?: string; avatarUrl?: string }): Promise<User>;
 
-  getProjects(): Promise<(Project & { creator: SafeUser; investmentCount: number })[]>;
+  getProjects(): Promise<(Project & { creator: SafeUser; bestowalCount: number })[]>;
   getProject(id: number): Promise<(Project & {
     creator: SafeUser,
     files: (File & { uploader: SafeUser })[],
-    investments: (Investment & { investor: SafeUser })[],
+    bestowals: (Bestowal & { member: SafeUser })[],
     submissions: (Submission & { user: SafeUser })[],
     coproducers: (Coproducer & { user: SafeUser })[],
     royaltySplits: RoyaltySplit[],
@@ -116,8 +116,8 @@ export interface IStorage {
   setSubmissionFileUrl(id: number, fileUrl: string): Promise<void>;
   getSubmission(id: number): Promise<Submission | undefined>;
 
-  createInvestment(investment: InsertInvestment): Promise<Investment>;
-  getProjectInvestments(projectId: number): Promise<Investment[]>;
+  createBestowal(bestowal: InsertBestowal): Promise<Bestowal>;
+  getProjectBestowals(projectId: number): Promise<(Bestowal & { member: SafeUser })[]>;
 
   getProjectSubmissions(projectId: number, types?: string[]): Promise<(Submission & { user: SafeUser })[]>;
   getAllSubmissions(types?: string[]): Promise<(Submission & { user: SafeUser; project: Project })[]>;
@@ -131,7 +131,6 @@ export interface IStorage {
 
   getRoyaltySplits(projectId: number): Promise<RoyaltySplit[]>;
   initializeRoyaltySplits(projectId: number): Promise<void>;
-  upsertProducerSplit(projectId: number, totalPercent: number): Promise<void>;
 
   // Events
   getEvents(): Promise<(Event & { voteCount: number })[]>;
@@ -346,13 +345,13 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async getProjects(): Promise<(Project & { creator: SafeUser; investmentCount: number })[]> {
+  async getProjects(): Promise<(Project & { creator: SafeUser; bestowalCount: number })[]> {
     const allProjects = await db.select().from(projects);
     const results = [];
     for (const project of allProjects) {
       const [creator] = await db.select().from(users).where(eq(users.id, project.creatorId));
-      const projectInvestments = await db.select().from(investments).where(eq(investments.projectId, project.id));
-      results.push({ ...project, creator: toSafeUser(creator), investmentCount: projectInvestments.length });
+      const projectBestowals = await db.select().from(bestowals).where(eq(bestowals.projectId, project.id));
+      results.push({ ...project, creator: toSafeUser(creator), bestowalCount: projectBestowals.length });
     }
     return results;
   }
@@ -360,7 +359,7 @@ export class DatabaseStorage implements IStorage {
   async getProject(id: number): Promise<(Project & {
     creator: SafeUser,
     files: (File & { uploader: SafeUser })[],
-    investments: (Investment & { investor: SafeUser })[],
+    bestowals: (Bestowal & { member: SafeUser })[],
     submissions: (Submission & { user: SafeUser })[],
     coproducers: (Coproducer & { user: SafeUser })[],
     royaltySplits: RoyaltySplit[],
@@ -376,10 +375,10 @@ export class DatabaseStorage implements IStorage {
       return { ...f, uploader: toSafeUser(uploader) };
     }));
 
-    const projectInvestments = await db.select().from(investments).where(eq(investments.projectId, id));
-    const investmentsWithInvestors = await Promise.all(projectInvestments.map(async (i) => {
-      const [investor] = await db.select().from(users).where(eq(users.id, i.investorId));
-      return { ...i, investor: toSafeUser(investor) };
+    const projectBestowals = await db.select().from(bestowals).where(eq(bestowals.projectId, id));
+    const bestowalsWithMembers = await Promise.all(projectBestowals.map(async (i) => {
+      const [member] = await db.select().from(users).where(eq(users.id, i.memberId));
+      return { ...i, member: toSafeUser(member) };
     }));
 
     const projectSubmissions = await this.getProjectSubmissions(id);
@@ -390,7 +389,7 @@ export class DatabaseStorage implements IStorage {
       ...project,
       creator: toSafeUser(creator),
       files: filesWithUploaders,
-      investments: investmentsWithInvestors,
+      bestowals: bestowalsWithMembers,
       submissions: projectSubmissions,
       coproducers: projectCoproducers,
       royaltySplits: projectRoyaltySplits,
@@ -427,14 +426,11 @@ export class DatabaseStorage implements IStorage {
     await db.update(submissions).set({ fileUrl }).where(eq(submissions.id, id));
   }
 
-  async createInvestment(insertInvestment: InsertInvestment): Promise<Investment> {
-    const [investment] = await db.insert(investments).values(insertInvestment).returning();
-    return investment;
+  async createBestowal(insertBestowal: InsertBestowal): Promise<Bestowal> {
+    const [row] = await db.insert(bestowals).values(insertBestowal).returning();
+    return row;
   }
 
-  async getProjectInvestments(projectId: number): Promise<Investment[]> {
-    return await db.select().from(investments).where(eq(investments.projectId, projectId));
-  }
 
   async getProjectSubmissions(projectId: number, types?: string[]): Promise<(Submission & { user: SafeUser })[]> {
     let rows: Submission[];
@@ -517,6 +513,14 @@ export class DatabaseStorage implements IStorage {
     return this.getCoproducers(projectId);
   }
 
+  async getProjectBestowals(projectId: number): Promise<(Bestowal & { member: SafeUser })[]> {
+    const rows = await db.select().from(bestowals).where(eq(bestowals.projectId, projectId));
+    return await Promise.all(rows.map(async (b) => {
+      const [member] = await db.select().from(users).where(eq(users.id, b.memberId));
+      return { ...b, member: toSafeUser(member) };
+    }));
+  }
+
   async getRoyaltySplits(projectId: number): Promise<RoyaltySplit[]> {
     return await db.select().from(royaltySplits).where(eq(royaltySplits.projectId, projectId));
   }
@@ -526,30 +530,12 @@ export class DatabaseStorage implements IStorage {
       { projectId, role: "artist", percentage: "45", notes: "Artist/Vocalist — Master recording (negotiable)" },
       { projectId, role: "co-producers", percentage: "21", notes: "Co-Producers (3+4) — 3% Master each × 7 blessed creators" },
       { projectId, role: "ministry", percentage: "5", notes: "Ministry Platform Bestowal (Master) + optional 5% publishing admin" },
-      { projectId, role: "producers", percentage: "0", notes: "Investment equity % assigned per backer" },
+      { projectId, role: "producers", percentage: "0", notes: "Set by the creator to reflect production work performed" },
       { projectId, role: "videographer", percentage: "0", notes: "Videographer/Marketing — negotiable up to 10% per contribution" },
       { projectId, role: "engineer", percentage: "0", notes: "Recording Engineer — negotiable up to 10% per contribution" },
       { projectId, role: "dancer", percentage: "0", notes: "Dancer/Actor — negotiable up to 10% per contribution" },
     ];
     await db.insert(royaltySplits).values(defaults);
-  }
-
-  async upsertProducerSplit(projectId: number, totalPercent: number): Promise<void> {
-    const existing = await db.select().from(royaltySplits)
-      .where(eq(royaltySplits.projectId, projectId))
-      .then(rows => rows.find(r => r.role === "producers"));
-    if (existing) {
-      await db.update(royaltySplits)
-        .set({ percentage: totalPercent.toString() })
-        .where(eq(royaltySplits.id, existing.id));
-    } else {
-      await db.insert(royaltySplits).values({
-        projectId,
-        role: "producers",
-        percentage: totalPercent.toString(),
-        notes: "Investment equity % assigned per backer",
-      });
-    }
   }
 
   // ── Events ─────────────────────────────────────────────────────────────────

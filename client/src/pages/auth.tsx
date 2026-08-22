@@ -74,7 +74,7 @@ export default function AuthPage() {
               Enter the <span className="text-gradient">Circle</span>
             </h1>
             <p className="text-muted-foreground text-lg">
-              Collaborate on stems, share ideas, and invest in the future of music production.
+              Collaborate on stems, share ideas, and build the future of music together.
             </p>
           </div>
 
