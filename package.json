@@ -13,7 +13,8 @@
     "db:migrate": "drizzle-kit migrate",
     "grant-ministry": "tsx scripts/grant-ministry.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "preflight": "tsx scripts/preflight.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

@@ -22,6 +22,8 @@ how each degrades when unset.
 
 ## Deploying
 
-See [DEPLOYMENT.md](DEPLOYMENT.md). A `render.yaml` blueprint and a portable
-`Dockerfile` are both included.
+[DEPLOYMENT.md](DEPLOYMENT.md) is an ordered walkthrough from nothing deployed
+to open doors. A `render.yaml` blueprint and a portable `Dockerfile` are both
+included, and `npm run preflight -- https://yourdomain.com` checks a live
+deployment from the outside.
 
