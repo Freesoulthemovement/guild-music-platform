@@ -238,6 +238,82 @@ suite("route authorization", () => {
     });
   });
 
+  describe("stewardship", () => {
+    it("counts nothing until a ministry member confirms it", async () => {
+      const { client: c } = await helpers.register(base, "t@ex.com", "tango");
+      const logged = await c.post("/api/stewardship/hours", {
+        kind: "service", hours: 8, description: "Cleared and fenced the north field",
+      });
+      expect(logged.status).toBe(201);
+
+      const mine = await c.get("/api/stewardship/me");
+      expect(mine.body.standing.verifiedServiceHours).toBe(0);
+      expect(mine.body.standing.pendingServiceHours).toBe(8);
+      expect(mine.body.standing.tier).toBe("volunteer");
+    });
+
+    it("refuses hours a member tries to confirm for themselves", async () => {
+      const { client: c, user } = await helpers.register(base, "u@ex.com", "uniform");
+      const { pool } = await import("../db");
+      await pool.query("UPDATE users SET roles = ARRAY['ministry'] WHERE id = $1", [user.id]);
+
+      const logged = await c.post("/api/stewardship/hours", {
+        kind: "study", hours: 5, description: "Studied the Living Dictionary at length",
+      });
+      const selfVerify = await c.patch(`/api/stewardship/hours/${logged.body.id}/verify`);
+      expect(selfVerify.status).toBe(404);
+
+      const mine = await c.get("/api/stewardship/me");
+      expect(mine.body.standing.verifiedStudyHours).toBe(0);
+    });
+
+    it("credits hours once confirmed, and only once", async () => {
+      const { client: member } = await helpers.register(base, "v@ex.com", "victor");
+      const { client: ministry, user: mUser } = await helpers.register(base, "w@ex.com", "whiskey");
+      const { pool } = await import("../db");
+      await pool.query("UPDATE users SET roles = ARRAY['ministry'] WHERE id = $1", [mUser.id]);
+
+      const logged = await member.post("/api/stewardship/hours", {
+        kind: "service", hours: 6, description: "Prepared and served the community meal",
+      });
+      expect((await ministry.patch(`/api/stewardship/hours/${logged.body.id}/verify`)).status).toBe(200);
+      // A replayed confirmation must not add the hours a second time.
+      expect((await ministry.patch(`/api/stewardship/hours/${logged.body.id}/verify`)).status).toBe(404);
+
+      const mine = await member.get("/api/stewardship/me");
+      expect(mine.body.standing.verifiedServiceHours).toBe(6);
+      expect(mine.body.standing.serviceRemaining).toBe(244);
+    });
+
+    it("keeps tier a granted standing, never an automatic one", async () => {
+      const { client: c } = await helpers.register(base, "x@ex.com", "xray");
+      // A member cannot promote themselves.
+      expect((await c.patch("/api/stewardship/tier", { username: "xray", tier: "clergy" })).status).toBe(403);
+      expect((await c.get("/api/stewardship/me")).body.standing.tier).toBe("volunteer");
+    });
+  });
+
+  describe("cypher pass", () => {
+    it("can be reached by service alone, without giving anything", async () => {
+      const { client: member } = await helpers.register(base, "y@ex.com", "yankee");
+      const { client: ministry, user: mUser } = await helpers.register(base, "z@ex.com", "zulu");
+      const { pool } = await import("../db");
+      await pool.query("UPDATE users SET roles = ARRAY['ministry'] WHERE id = $1", [mUser.id]);
+
+      // 40 verified service hours is one of the three roads to a Pass.
+      for (let i = 0; i < 5; i++) {
+        const e = await member.post("/api/stewardship/hours", {
+          kind: "service", hours: 8, description: `Tended the land, day ${i + 1}`,
+        });
+        await ministry.patch(`/api/stewardship/hours/${e.body.id}/verify`);
+      }
+
+      const summary = await member.get("/api/donations/me");
+      expect(summary.body.yearTotal).toBe(0);
+      expect(summary.body.hasPass).toBe(true);
+    });
+  });
+
   describe("health", () => {
     it("reports liveness and readiness", async () => {
       const { client } = helpers;

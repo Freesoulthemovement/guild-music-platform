@@ -24,6 +24,7 @@ import FeedPage from "@/pages/feed";
 import MessagesPage from "@/pages/messages";
 import PlaylistsPage from "@/pages/playlists";
 import LibraryPage from "@/pages/library";
+import StewardshipPage from "@/pages/stewardship";
 import ResetPasswordPage from "@/pages/reset-password";
 import VerifyEmailPage from "@/pages/verify-email";
 
@@ -118,6 +119,7 @@ function Router() {
         <Route path="/reset-password" component={ResetPasswordPage} />
         <Route path="/verify-email" component={VerifyEmailPage} />
         <Route path="/library" component={LibraryPage} />
+        <Route path="/stewardship" component={StewardshipPage} />
         <Route path="/charter" component={Charter} />
         <Route component={NotFound} />
       </Switch>

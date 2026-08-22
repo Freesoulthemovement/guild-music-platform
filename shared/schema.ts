@@ -68,6 +68,10 @@ export const users = pgTable("users", {
   agreedAt: timestamp("agreed_at"),
   stripeCustomerId: text("stripe_customer_id"),
   credits: integer("credits").default(0),
+  // Article II standing. Granted by the ministry — steward requires a vow and
+  // living on site, clergy requires board confirmation, so neither is awarded
+  // automatically by reaching an hour count.
+  tier: text("tier").notNull().default("volunteer"),
   roles: text("roles").array().default([]),
 });
 
@@ -158,6 +162,75 @@ export const bestowals = pgTable("bestowals", {
   note: text("note"),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+
+// ── Stewardship ───────────────────────────────────────────────────────────────
+
+/** The three tiers of Article II of the bylaws. */
+export const MEMBER_TIERS = ["volunteer", "steward", "clergy"] as const;
+export type MemberTier = typeof MEMBER_TIERS[number];
+
+export const STEWARDSHIP_KINDS = ["study", "service"] as const;
+export type StewardshipKind = typeof STEWARDSHIP_KINDS[number];
+
+/**
+ * Thresholds for standing. Hours only count once a ministry member has
+ * verified them — self-reported hours confer nothing, so the ladder cannot be
+ * climbed by assertion.
+ */
+export const CLERGY_STUDY_HOURS = 250;
+export const CLERGY_SERVICE_HOURS = 250;
+
+/**
+ * A Cypher Pass may be reached by giving, by study, or by service. Giving is
+ * one path among three rather than the only one, so the Pass is not a
+ * purchased privilege while still gathering support for land.
+ */
+export const PASS_SINGLE_BESTOWAL = 700;
+export const PASS_CUMULATIVE_BESTOWAL = 1000;
+export const PASS_SERVICE_HOURS = 40;
+export const PASS_STUDY_HOURS = 40;
+
+/**
+ * An auditable log of study and service.
+ *
+ * Nothing here is money and nothing converts to money. Hours advance a member
+ * toward the standing that lets the ministry provide land, housing and — for
+ * clergy — a capped stipend, per Article II. Verification is required so the
+ * record reflects work actually done.
+ */
+export const stewardshipHours = pgTable("stewardship_hours", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  kind: text("kind").notNull(),
+  hours: numeric("hours").notNull(),
+  description: text("description").notNull(),
+  /** Ministry member who confirmed the work. Null while pending. */
+  verifiedBy: integer("verified_by"),
+  verifiedAt: timestamp("verified_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const stewardshipHoursRelations = relations(stewardshipHours, ({ one }) => ({
+  member: one(users, { fields: [stewardshipHours.userId], references: [users.id] }),
+}));
+
+export type StewardshipEntry = typeof stewardshipHours.$inferSelect;
+export const insertStewardshipHoursSchema = createInsertSchema(stewardshipHours)
+  .omit({ id: true, createdAt: true, verifiedBy: true, verifiedAt: true });
+export type InsertStewardshipEntry = z.infer<typeof insertStewardshipHoursSchema>;
+
+/** What a member's record adds up to. */
+export type StewardshipStanding = {
+  tier: MemberTier;
+  verifiedStudyHours: number;
+  verifiedServiceHours: number;
+  pendingStudyHours: number;
+  pendingServiceHours: number;
+  clergyEligible: boolean;
+  studyRemaining: number;
+  serviceRemaining: number;
+};
 
 export const submissions = pgTable("submissions", {
   id: serial("id").primaryKey(),

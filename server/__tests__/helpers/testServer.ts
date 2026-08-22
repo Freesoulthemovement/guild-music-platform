@@ -39,7 +39,7 @@ export async function resetDatabase() {
   const { pool } = await import("../../db");
   await pool.query(`
     TRUNCATE TABLE
-      auth_tokens, user_credentials, user_sessions,
+      auth_tokens, user_credentials, user_sessions, stewardship_hours,
       license_unlocks, playlist_tracks, playlists,
       contribution_negotiations, coproducers, royalty_splits,
       offerings, bestowals, submissions, files,

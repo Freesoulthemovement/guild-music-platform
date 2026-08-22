@@ -3,7 +3,15 @@ import type { Express } from "express";
 import { type Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
-import { ROLES } from "@shared/schema";
+import {
+  ROLES,
+  MEMBER_TIERS,
+  STEWARDSHIP_KINDS,
+  PASS_SINGLE_BESTOWAL,
+  PASS_CUMULATIVE_BESTOWAL,
+  PASS_SERVICE_HOURS,
+  PASS_STUDY_HOURS,
+} from "@shared/schema";
 import { z } from "zod";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
@@ -716,26 +724,7 @@ export async function registerRoutes(
         amount: input.amount.toString(),
         year,
       });
-      // Check pass eligibility: single ≥$700 OR cumulative ≥$1,000
-      const existingPass = await storage.getUserCypherPass(
-        req.session.userId,
-        year,
-      );
-      if (!existingPass) {
-        const yearDonations = await storage.getUserDonations(
-          req.session.userId,
-          year,
-        );
-        const cumulative = yearDonations.reduce(
-          (s, d) => s + Number(d.amount),
-          0,
-        );
-        const singleQualifies = input.amount >= 700;
-        const cumulativeQualifies = cumulative >= 1000;
-        if (singleQualifies || cumulativeQualifies) {
-          await storage.grantCypherPass(req.session.userId, year);
-        }
-      }
+      await evaluateCypherPass(req.session.userId, year);
       res.status(201).json(donation);
     } catch (err) {
       if (err instanceof z.ZodError)
@@ -831,6 +820,96 @@ export async function registerRoutes(
       eventId,
     );
     res.status(200).json({ count: userVotes.length, votes: userVotes });
+  });
+
+  // ── Stewardship (Article II) ──────────────────────────────────────────────
+  // Hours are the ladder toward land, housing and — for clergy — a stipend.
+  // Nothing here converts to money and nothing accrues interest.
+
+  app.get("/api/stewardship/me", async (req, res) => {
+    if (!req.session?.userId)
+      return res.status(401).json({ message: "Not logged in" });
+    const standing = await storage.getStewardshipStanding(req.session.userId);
+    const entries = await storage.getStewardshipEntries(req.session.userId);
+    res.status(200).json({ standing, entries });
+  });
+
+  app.post("/api/stewardship/hours", async (req, res) => {
+    if (!req.session?.userId)
+      return res.status(401).json({ message: "Not logged in" });
+    try {
+      const input = z
+        .object({
+          kind: z.enum(STEWARDSHIP_KINDS),
+          // Capped per entry so a single claim cannot leap the ladder; a long
+          // stretch of work is logged as the days it actually took.
+          hours: z.coerce.number().positive().max(24),
+          description: z.string().trim().min(10).max(500),
+        })
+        .parse(req.body);
+
+      const entry = await storage.logStewardshipHours({
+        userId: req.session.userId,
+        kind: input.kind,
+        hours: input.hours.toString(),
+        description: input.description,
+      });
+      // Recorded, but worth nothing until a ministry member confirms it.
+      res.status(201).json(entry);
+    } catch (err) {
+      if (err instanceof z.ZodError)
+        res.status(400).json({ message: err.errors[0].message });
+      else res.status(500).json({ message: "Internal error" });
+    }
+  });
+
+  /** Ministry only: everything awaiting confirmation. */
+  app.get("/api/stewardship/pending", async (req, res) => {
+    const caller = req.session?.userId ? await storage.getUser(req.session.userId) : null;
+    if (!caller) return res.status(401).json({ message: "Not logged in" });
+    if (!(caller.roles ?? []).includes("ministry"))
+      return res.status(403).json({ message: "Ministry role required" });
+    res.status(200).json(await storage.getPendingStewardshipEntries());
+  });
+
+  app.patch("/api/stewardship/hours/:id/verify", async (req, res) => {
+    const caller = req.session?.userId ? await storage.getUser(req.session.userId) : null;
+    if (!caller) return res.status(401).json({ message: "Not logged in" });
+    if (!(caller.roles ?? []).includes("ministry"))
+      return res.status(403).json({ message: "Ministry role required" });
+
+    const target = await storage.verifyStewardshipEntry(Number(req.params.id), caller.id);
+    if (!target) {
+      // Covers all three refusals: unknown, already confirmed, or the caller's
+      // own hours — which another ministry member must confirm.
+      return res.status(404).json({
+        message: "Entry not found, already confirmed, or your own",
+      });
+    }
+
+    // Verified service or study can itself reach a Cypher Pass.
+    await evaluateCypherPass(target.userId, new Date().getFullYear());
+    res.status(200).json(target);
+  });
+
+  /** Ministry only: grant Article II standing. Never automatic. */
+  app.patch("/api/stewardship/tier", async (req, res) => {
+    const caller = req.session?.userId ? await storage.getUser(req.session.userId) : null;
+    if (!caller) return res.status(401).json({ message: "Not logged in" });
+    if (!(caller.roles ?? []).includes("ministry"))
+      return res.status(403).json({ message: "Ministry role required" });
+    try {
+      const input = z
+        .object({ username: z.string().min(1), tier: z.enum(MEMBER_TIERS) })
+        .parse(req.body);
+      const target = await storage.getUserByUsername(input.username);
+      if (!target) return res.status(404).json({ message: "User not found" });
+      res.status(200).json(await storage.setMemberTier(target.id, input.tier));
+    } catch (err) {
+      if (err instanceof z.ZodError)
+        res.status(400).json({ message: err.errors[0].message });
+      else res.status(500).json({ message: "Internal error" });
+    }
   });
 
   // ── Ministry ─────────────────────────────────────────────────────────────
@@ -1662,6 +1741,33 @@ export async function registerRoutes(
   }
 
   return httpServer;
+}
+
+
+/**
+ * Grants a Cypher Pass if the member has reached it by any road.
+ *
+ * Giving is one path of three. Study and verified service reach the same
+ * standing, so the Pass is not something only those with money can hold —
+ * while a bestowal still gathers support for land.
+ */
+async function evaluateCypherPass(userId: number, year: number): Promise<boolean> {
+  if (await storage.getUserCypherPass(userId, year)) return true;
+
+  const donations = await storage.getUserDonations(userId, year);
+  const cumulative = donations.reduce((total, d) => total + Number(d.amount), 0);
+  const largestSingle = donations.reduce((max, d) => Math.max(max, Number(d.amount)), 0);
+
+  const standing = await storage.getStewardshipStanding(userId);
+
+  const earned =
+    largestSingle >= PASS_SINGLE_BESTOWAL ||
+    cumulative >= PASS_CUMULATIVE_BESTOWAL ||
+    standing.verifiedServiceHours >= PASS_SERVICE_HOURS ||
+    standing.verifiedStudyHours >= PASS_STUDY_HOURS;
+
+  if (earned) await storage.grantCypherPass(userId, year);
+  return earned;
 }
 
 /**

@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { eq, inArray, desc, and, sql, or, ne } from "drizzle-orm";
 import {
-  users, projects, files, bestowals, submissions, offerings, coproducers, royaltySplits,
+  users, projects, files, bestowals, submissions, stewardshipHours, offerings, coproducers, royaltySplits,
   events, donations, cypherPasses, votes, contributionNegotiations, licenseUnlocks,
   follows, messages, playlists, playlistTracks, userCredentials, authTokens,
   type User, type InsertUser,
@@ -9,6 +9,9 @@ import {
   type Project, type InsertProject,
   type File, type InsertFile,
   type Bestowal, type InsertBestowal,
+  type StewardshipEntry, type InsertStewardshipEntry,
+  type StewardshipStanding, type MemberTier,
+  CLERGY_STUDY_HOURS, CLERGY_SERVICE_HOURS,
   type Submission, type InsertSubmission,
   type Offering, type InsertOffering,
   type Coproducer, type InsertCoproducer,
@@ -150,6 +153,14 @@ export interface IStorage {
 
   // Ministry
   getMinistryArtists(): Promise<SafeUser[]>;
+
+  // Stewardship — Article II of the bylaws
+  logStewardshipHours(entry: InsertStewardshipEntry): Promise<StewardshipEntry>;
+  getStewardshipEntries(userId: number): Promise<StewardshipEntry[]>;
+  getPendingStewardshipEntries(): Promise<(StewardshipEntry & { member: SafeUser })[]>;
+  verifyStewardshipEntry(id: number, verifierId: number): Promise<StewardshipEntry | undefined>;
+  getStewardshipStanding(userId: number): Promise<StewardshipStanding>;
+  setMemberTier(userId: number, tier: MemberTier): Promise<User>;
   getMinistryStats(): Promise<{ passHolders: number; totalVotes: number }>;
 
   // Contribution Negotiations
@@ -615,6 +626,86 @@ export class DatabaseStorage implements IStorage {
     return allUsers
       .filter(u => (u.roles ?? []).includes("ministry"))
       .map(toSafeUser);
+  }
+
+  // ── Stewardship ─────────────────────────────────────────────────────────────
+
+  async logStewardshipHours(entry: InsertStewardshipEntry): Promise<StewardshipEntry> {
+    const [row] = await db.insert(stewardshipHours).values(entry).returning();
+    return row;
+  }
+
+  async getStewardshipEntries(userId: number): Promise<StewardshipEntry[]> {
+    return await db
+      .select()
+      .from(stewardshipHours)
+      .where(eq(stewardshipHours.userId, userId))
+      .orderBy(desc(stewardshipHours.createdAt));
+  }
+
+  async getPendingStewardshipEntries(): Promise<(StewardshipEntry & { member: SafeUser })[]> {
+    const rows = await db
+      .select()
+      .from(stewardshipHours)
+      .where(sql`${stewardshipHours.verifiedAt} IS NULL`)
+      .orderBy(desc(stewardshipHours.createdAt));
+    return await Promise.all(rows.map(async (r) => {
+      const [member] = await db.select().from(users).where(eq(users.id, r.userId));
+      return { ...r, member: toSafeUser(member) };
+    }));
+  }
+
+  /**
+   * Confirms an entry, once.
+   *
+   * Both guards live in the UPDATE rather than in a prior read: already-verified
+   * entries cannot be credited twice by concurrent requests, and a member cannot
+   * confirm their own hours even if they hold the ministry role.
+   */
+  async verifyStewardshipEntry(id: number, verifierId: number): Promise<StewardshipEntry | undefined> {
+    const [row] = await db
+      .update(stewardshipHours)
+      .set({ verifiedBy: verifierId, verifiedAt: new Date() })
+      .where(
+        and(
+          eq(stewardshipHours.id, id),
+          sql`${stewardshipHours.verifiedAt} IS NULL`,
+          sql`${stewardshipHours.userId} <> ${verifierId}`,
+        ),
+      )
+      .returning();
+    return row;
+  }
+
+  async getStewardshipStanding(userId: number): Promise<StewardshipStanding> {
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    const rows = await db.select().from(stewardshipHours).where(eq(stewardshipHours.userId, userId));
+
+    const sum = (kind: string, verified: boolean) =>
+      rows
+        .filter((r) => r.kind === kind && (r.verifiedAt !== null) === verified)
+        .reduce((total, r) => total + Number(r.hours), 0);
+
+    const verifiedStudyHours = sum("study", true);
+    const verifiedServiceHours = sum("service", true);
+
+    return {
+      tier: (user?.tier ?? "volunteer") as MemberTier,
+      verifiedStudyHours,
+      verifiedServiceHours,
+      pendingStudyHours: sum("study", false),
+      pendingServiceHours: sum("service", false),
+      clergyEligible:
+        verifiedStudyHours >= CLERGY_STUDY_HOURS &&
+        verifiedServiceHours >= CLERGY_SERVICE_HOURS,
+      studyRemaining: Math.max(0, CLERGY_STUDY_HOURS - verifiedStudyHours),
+      serviceRemaining: Math.max(0, CLERGY_SERVICE_HOURS - verifiedServiceHours),
+    };
+  }
+
+  async setMemberTier(userId: number, tier: MemberTier): Promise<User> {
+    const [user] = await db.update(users).set({ tier }).where(eq(users.id, userId)).returning();
+    return user;
   }
 
   async getMinistryStats(): Promise<{ passHolders: number; totalVotes: number }> {
